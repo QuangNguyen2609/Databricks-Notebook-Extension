@@ -12,6 +12,7 @@ dist/
 # Test output
 .vscode-test/
 coverage/
+.nyc_output/
 
 # Debug logs
 npm-debug.log*

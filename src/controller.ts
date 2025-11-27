@@ -76,7 +76,7 @@ export class DatabricksNotebookController implements vscode.Disposable {
       const cellType = metadata?.databricksType as string | undefined;
 
       let outputMessage: string;
-      let outputMimeType = 'text/plain';
+      const outputMimeType = 'text/plain';
 
       // Handle different cell types
       if (languageId === 'markdown' || cellType === 'markdown') {
