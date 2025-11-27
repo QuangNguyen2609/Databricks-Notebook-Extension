@@ -1,0 +1,103 @@
+{
+  "name": "databricks-notebook-viewer",
+  "displayName": "Databricks Notebook Viewer",
+  "description": "Visualize Databricks .py notebooks with proper cell rendering, syntax highlighting, and markdown support",
+  "version": "0.0.1",
+  "publisher": "databricks-notebook-viewer",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Notebooks",
+    "Data Science",
+    "Visualization"
+  ],
+  "keywords": [
+    "databricks",
+    "notebook",
+    "spark",
+    "pyspark",
+    "data engineering",
+    "jupyter"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "notebooks": [
+      {
+        "type": "databricks-notebook",
+        "displayName": "Databricks Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.py"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "databricks-notebook.openAsNotebook",
+        "title": "Open as Databricks Notebook",
+        "category": "Databricks"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "databricks-notebook.openAsNotebook",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "databricks-notebook.openAsNotebook",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Databricks Notebook Viewer",
+      "properties": {
+        "databricks-notebook.autoOpenNotebooks": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open detected Databricks notebooks in notebook view"
+        },
+        "databricks-notebook.showNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notification when Databricks notebook is detected"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "mocha --require ts-node/register src/test/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.x",
+    "@typescript-eslint/parser": "^6.x",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.x",
+    "glob": "^13.0.0",
+    "mocha": "^10.2.0",
+    "ts-loader": "^9.x",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.x",
+    "webpack": "^5.x",
+    "webpack-cli": "^5.x"
+  }
+}
