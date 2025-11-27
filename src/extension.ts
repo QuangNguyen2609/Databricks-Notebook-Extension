@@ -13,6 +13,9 @@ import { DatabricksNotebookController } from './controller';
 // Track documents currently being processed to avoid race conditions
 const processingDocuments = new Set<string>();
 
+// Databricks notebook header constant
+const DATABRICKS_HEADER = '# Databricks notebook source';
+
 /**
  * Extension activation
  * Called when VS Code activates the extension
@@ -89,25 +92,41 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
 }
 
 /**
- * Close the text editor tab for a given URI
- * @param uriString - The URI string of the document to close
+ * Quick synchronous check if document is a Databricks notebook
+ * Uses document content already in memory - much faster than file I/O
+ * @param document - The text document to check
+ * @returns true if it's a Databricks notebook
  */
-async function closeTextEditorTab(uriString: string): Promise<void> {
+function isDatabricksNotebookSync(document: vscode.TextDocument): boolean {
+  if (document.lineCount === 0) {
+    return false;
+  }
+  const firstLine = document.lineAt(0).text.trim();
+  return firstLine === DATABRICKS_HEADER;
+}
+
+/**
+ * Find the tab and view column for a text document
+ * @param uriString - The URI string of the document
+ * @returns Object with tab and viewColumn, or null if not found
+ */
+function findTextEditorTab(uriString: string): { tab: vscode.Tab; viewColumn: vscode.ViewColumn } | null {
   for (const tabGroup of vscode.window.tabGroups.all) {
     for (const tab of tabGroup.tabs) {
       if (
         tab.input instanceof vscode.TabInputText &&
         tab.input.uri.toString() === uriString
       ) {
-        await vscode.window.tabGroups.close(tab);
-        return;
+        return { tab, viewColumn: tabGroup.viewColumn };
       }
     }
   }
+  return null;
 }
 
 /**
  * Handle document open event to detect Databricks notebooks
+ * Seamlessly replaces text editor with notebook view
  * @param document - The opened document
  */
 async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> {
@@ -123,10 +142,8 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     return;
   }
 
-  // Check if it's a Databricks notebook
-  const isDatabricks = await checkIsDatabricksNotebook(document.uri);
-
-  if (!isDatabricks) {
+  // Quick synchronous check - uses document content already in memory
+  if (!isDatabricksNotebookSync(document)) {
     return;
   }
 
@@ -140,15 +157,22 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     processingDocuments.add(uriString);
 
     try {
-      // Open as notebook first
+      // Find the current tab info before closing
+      const tabInfo = findTextEditorTab(uriString);
+      const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
+
+      // IMPORTANT: Close text editor FIRST to avoid two tabs being visible
+      if (tabInfo) {
+        await vscode.window.tabGroups.close(tabInfo.tab);
+      }
+
+      // Open notebook in the same view column
       await vscode.commands.executeCommand(
         'vscode.openWith',
         document.uri,
-        'databricks-notebook'
+        'databricks-notebook',
+        viewColumn
       );
-
-      // Close the text editor tab that was opened
-      await closeTextEditorTab(uriString);
     } finally {
       // Clear processing flag after a delay to handle any remaining events
       setTimeout(() => {
@@ -169,15 +193,22 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
       );
 
       if (action === 'Open as Notebook') {
-        // Open as notebook
+        // Find the current tab info
+        const tabInfo = findTextEditorTab(uriString);
+        const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
+
+        // Close text editor first
+        if (tabInfo) {
+          await vscode.window.tabGroups.close(tabInfo.tab);
+        }
+
+        // Open notebook
         await vscode.commands.executeCommand(
           'vscode.openWith',
           document.uri,
-          'databricks-notebook'
+          'databricks-notebook',
+          viewColumn
         );
-
-        // Close the text editor tab
-        await closeTextEditorTab(uriString);
       } else if (action === "Don't ask again") {
         await config.update('showNotification', false, vscode.ConfigurationTarget.Global);
       }

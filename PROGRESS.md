@@ -1,0 +1,194 @@
+# Databricks Notebook Viewer - Development Progress
+
+## Overview
+
+This VS Code extension renders Databricks `.py` notebook files as proper notebooks with visual cell separation, rendered Markdown, and syntax-highlighted code cells.
+
+---
+
+## Completed Features
+
+### Phase 1: Core Extension Infrastructure
+
+#### Parser (`src/parser.ts`)
+- [x] Detect Databricks notebooks via `# Databricks notebook source` header
+- [x] Parse cell delimiters (`# COMMAND ----------`)
+- [x] Extract MAGIC commands and map to cell types
+- [x] Support all magic commands:
+  - `%md`, `%md-sandbox` → Markdown cells
+  - `%sql` → SQL cells
+  - `%python` → Python cells
+  - `%scala` → Scala cells
+  - `%r` → R cells
+  - `%sh` → Shell cells
+  - `%fs` → Filesystem commands
+  - `%run` → Notebook execution
+  - `%pip` → Package installation
+- [x] Parse `DBTITLE` metadata for cell titles
+- [x] Serialize cells back to Databricks format (round-trip support)
+- [x] Sort magic commands by length to prevent `%r` matching before `%run`
+
+#### Serializer (`src/serializer.ts`)
+- [x] Implement `vscode.NotebookSerializer` interface
+- [x] Convert Databricks cells to VS Code `NotebookCellData`
+- [x] Preserve cell metadata for round-trip editing
+- [x] Handle Markup vs Code cell kinds
+
+#### Controller (`src/controller.ts`)
+- [x] Implement `vscode.NotebookController` for execution support
+- [x] Display informative messages about execution requirements
+- [x] Support execution order tracking
+
+#### Extension Entry (`src/extension.ts`)
+- [x] Register notebook serializer
+- [x] Register notebook controller
+- [x] Register "Open as Databricks Notebook" command
+- [x] Auto-detect Databricks notebooks on file open
+- [x] Configuration options for auto-open behavior
+
+---
+
+### Phase 2: User Experience Improvements
+
+#### Command Icon
+- [x] Added `$(notebook)` icon to "Open as Databricks Notebook" command
+- [x] Icon appears in editor title bar for `.py` files
+- [x] Tooltip shows "Open as Databricks Notebook" on hover
+- [x] Hidden when already viewing as notebook (`!notebookEditorFocused`)
+
+#### Seamless Auto-Open
+- [x] **Fixed double-tab issue**: Close text editor FIRST, then open notebook
+- [x] **Faster detection**: Use synchronous `document.lineAt(0)` instead of async file I/O
+- [x] **Preserve view column**: Open notebook in same editor group as closed text file
+- [x] **No permanent caching**: Use temporary processing flag (500ms) so files can be reopened
+
+#### Configuration
+- [x] `databricks-notebook.autoOpenNotebooks`: Auto-open detected notebooks
+- [x] `databricks-notebook.showNotification`: Show prompt for detected notebooks
+
+---
+
+### Phase 3: CI/CD Pipeline
+
+#### GitHub Actions Workflow (`.github/workflows/ci.yml`)
+- [x] Multi-platform testing: Ubuntu, Windows, macOS
+- [x] Multiple Node.js versions: 18.x, 20.x
+- [x] Type checking with `tsc --noEmit`
+- [x] Linting with ESLint
+- [x] Unit tests with Mocha
+- [x] Code coverage with nyc/Istanbul
+- [x] Extension packaging with webpack
+- [x] Automated release on version tags
+
+#### npm Scripts
+- [x] `npm run type-check` - TypeScript type checking
+- [x] `npm run lint` - ESLint linting
+- [x] `npm run lint:fix` - Auto-fix linting issues
+- [x] `npm run test:unit` - Run unit tests
+- [x] `npm run test:coverage` - Tests with coverage report
+- [x] `npm run ci` - Run all checks locally
+- [x] `npm run compile` - Build with webpack
+- [x] `npm run package` - Production build
+
+---
+
+## Test Coverage
+
+### Parser Tests (29 tests, all passing)
+- Header detection
+- Single and multiple cell parsing
+- Markdown cell parsing (including `%md-sandbox`)
+- SQL cell parsing
+- Scala, R, Shell cell parsing
+- Special commands (`%run`, `%pip`, `%fs`)
+- DBTITLE metadata
+- Mixed content notebooks
+- Serialization (Python, Markdown, delimiters, titles)
+- Round-trip parsing preservation
+- Utility functions (`countCells`, `getCellTypes`)
+
+---
+
+## Architecture
+
+```
+src/
+├── extension.ts     # Extension entry point, command registration
+├── serializer.ts    # NotebookSerializer for VS Code integration
+├── parser.ts        # Databricks .py format parser
+├── controller.ts    # NotebookController for execution
+├── types.ts         # TypeScript interfaces
+└── test/
+    ├── parser.test.ts    # Comprehensive parser tests
+    ├── runTest.ts        # Test runner
+    └── suite/index.ts    # Test suite configuration
+```
+
+---
+
+## Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `package.json` | Extension manifest, commands, menus, configuration |
+| `tsconfig.json` | TypeScript compiler options |
+| `webpack.config.js` | Bundler configuration |
+| `.eslintrc.json` | ESLint rules for TypeScript |
+| `.nycrc.json` | Code coverage configuration |
+| `.github/workflows/ci.yml` | GitHub Actions CI/CD |
+
+---
+
+## Key Technical Decisions
+
+### 1. Close-Then-Open Pattern
+To avoid the jarring two-tab experience, the extension:
+1. Finds the current text editor tab and its view column
+2. Closes the text editor tab first
+3. Opens the notebook in the same view column
+
+### 2. Synchronous Content Check
+Uses `document.lineAt(0).text` for instant detection instead of async file I/O, making auto-open feel instantaneous.
+
+### 3. Temporary Processing Flag
+Uses a `Set<string>` with 500ms timeout instead of permanent cache, ensuring:
+- No duplicate processing during the same open operation
+- Files can be reopened after closing
+
+### 4. Magic Command Sorting
+Commands are sorted by length (longest first) to prevent `%r` from matching before `%run`.
+
+---
+
+## Known Limitations
+
+1. **Brief flash on auto-open**: The text editor briefly appears before being replaced. This is unavoidable because VS Code's `onDidOpenTextDocument` fires after the editor opens.
+
+2. **No execution support**: The controller shows informational messages but doesn't execute code. Integration with Databricks Connect could be added in the future.
+
+3. **No syntax validation**: The parser doesn't validate that the content within cells is valid code.
+
+---
+
+## Future Enhancements
+
+- [ ] Databricks Connect integration for cell execution
+- [ ] Cluster selection UI
+- [ ] Output caching
+- [ ] Cell folding
+- [ ] Table of contents from markdown headers
+- [ ] Export to Jupyter `.ipynb`
+- [ ] Diff view for notebook versions
+- [ ] Git integration for better notebook diffs
+
+---
+
+## Version History
+
+### v0.0.1 (Current)
+- Initial implementation
+- Full parser for Databricks .py format
+- VS Code Notebook API integration
+- Auto-open with seamless tab replacement
+- GitHub Actions CI/CD
+- 29 passing tests
