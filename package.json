@@ -39,7 +39,8 @@
       {
         "command": "databricks-notebook.openAsNotebook",
         "title": "Open as Databricks Notebook",
-        "category": "Databricks"
+        "category": "Databricks",
+        "icon": "$(notebook)"
       }
     ],
     "menus": {
@@ -51,6 +52,13 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "databricks-notebook.openAsNotebook",
+          "when": "resourceExtname == .py && !notebookEditorFocused",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
         {
           "command": "databricks-notebook.openAsNotebook",
           "when": "resourceExtname == .py",

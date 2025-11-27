@@ -10,8 +10,8 @@ import * as vscode from 'vscode';
 import { DatabricksNotebookSerializer, checkIsDatabricksNotebook } from './serializer';
 import { DatabricksNotebookController } from './controller';
 
-// Track shown documents to avoid duplicate notifications
-const notifiedDocuments = new Set<string>();
+// Track documents currently being processed to avoid race conditions
+const processingDocuments = new Set<string>();
 
 /**
  * Extension activation
@@ -51,11 +51,6 @@ export function activate(context: vscode.ExtensionContext): void {
       await handleDocumentOpen(document);
     })
   );
-
-  // Check currently open documents
-  for (const editor of vscode.window.visibleTextEditors) {
-    handleDocumentOpen(editor.document);
-  }
 }
 
 /**
@@ -94,6 +89,24 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
 }
 
 /**
+ * Close the text editor tab for a given URI
+ * @param uriString - The URI string of the document to close
+ */
+async function closeTextEditorTab(uriString: string): Promise<void> {
+  for (const tabGroup of vscode.window.tabGroups.all) {
+    for (const tab of tabGroup.tabs) {
+      if (
+        tab.input instanceof vscode.TabInputText &&
+        tab.input.uri.toString() === uriString
+      ) {
+        await vscode.window.tabGroups.close(tab);
+        return;
+      }
+    }
+  }
+}
+
+/**
  * Handle document open event to detect Databricks notebooks
  * @param document - The opened document
  */
@@ -103,8 +116,10 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     return;
   }
 
-  // Skip if already notified for this document
-  if (notifiedDocuments.has(document.uri.toString())) {
+  const uriString = document.uri.toString();
+
+  // Skip if already processing this document (avoid race conditions)
+  if (processingDocuments.has(uriString)) {
     return;
   }
 
@@ -120,25 +135,57 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   const autoOpen = config.get<boolean>('autoOpenNotebooks', false);
   const showNotification = config.get<boolean>('showNotification', true);
 
-  // Mark as notified
-  notifiedDocuments.add(document.uri.toString());
-
   if (autoOpen) {
-    // Auto-open as notebook
-    vscode.commands.executeCommand('databricks-notebook.openAsNotebook', document.uri);
-  } else if (showNotification) {
-    // Show notification
-    const action = await vscode.window.showInformationMessage(
-      'This appears to be a Databricks notebook. Would you like to open it as a notebook?',
-      'Open as Notebook',
-      'Keep as Python',
-      "Don't ask again"
-    );
+    // Mark as processing to prevent duplicate handling
+    processingDocuments.add(uriString);
 
-    if (action === 'Open as Notebook') {
-      vscode.commands.executeCommand('databricks-notebook.openAsNotebook', document.uri);
-    } else if (action === "Don't ask again") {
-      config.update('showNotification', false, vscode.ConfigurationTarget.Global);
+    try {
+      // Open as notebook first
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        document.uri,
+        'databricks-notebook'
+      );
+
+      // Close the text editor tab that was opened
+      await closeTextEditorTab(uriString);
+    } finally {
+      // Clear processing flag after a delay to handle any remaining events
+      setTimeout(() => {
+        processingDocuments.delete(uriString);
+      }, 500);
+    }
+  } else if (showNotification) {
+    // Mark as processing
+    processingDocuments.add(uriString);
+
+    try {
+      // Show notification
+      const action = await vscode.window.showInformationMessage(
+        'This appears to be a Databricks notebook. Would you like to open it as a notebook?',
+        'Open as Notebook',
+        'Keep as Python',
+        "Don't ask again"
+      );
+
+      if (action === 'Open as Notebook') {
+        // Open as notebook
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          document.uri,
+          'databricks-notebook'
+        );
+
+        // Close the text editor tab
+        await closeTextEditorTab(uriString);
+      } else if (action === "Don't ask again") {
+        await config.update('showNotification', false, vscode.ConfigurationTarget.Global);
+      }
+    } finally {
+      // Clear processing flag after a delay
+      setTimeout(() => {
+        processingDocuments.delete(uriString);
+      }, 500);
     }
   }
 }
@@ -149,5 +196,5 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
  */
 export function deactivate(): void {
   console.log('Databricks Notebook Viewer is now deactivated');
-  notifiedDocuments.clear();
+  processingDocuments.clear();
 }
