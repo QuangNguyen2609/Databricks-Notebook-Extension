@@ -21,6 +21,9 @@
     "jupyter"
   ],
   "activationEvents": [],
+  "extensionDependencies": [
+    "ms-python.python"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "notebooks": [
@@ -41,6 +44,24 @@
         "title": "Open as Databricks Notebook",
         "category": "Databricks",
         "icon": "$(notebook)"
+      },
+      {
+        "command": "databricks-notebook.openAsText",
+        "title": "View Source",
+        "category": "Databricks",
+        "icon": "$(code)"
+      },
+      {
+        "command": "databricks-notebook.restartKernel",
+        "title": "Restart Kernel",
+        "category": "Databricks",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "databricks-notebook.interruptKernel",
+        "title": "Interrupt Kernel",
+        "category": "Databricks",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -55,6 +76,11 @@
         {
           "command": "databricks-notebook.openAsNotebook",
           "when": "resourceExtname == .py && !notebookEditorFocused",
+          "group": "navigation"
+        },
+        {
+          "command": "databricks-notebook.openAsText",
+          "when": "resourceExtname == .py && notebookEditorFocused && notebookType == 'databricks-notebook'",
           "group": "navigation"
         }
       ],
@@ -78,6 +104,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show notification when Databricks notebook is detected"
+        },
+        "databricks-notebook.pythonExecutionTimeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Timeout for Python cell execution in milliseconds"
         }
       }
     }
@@ -113,6 +144,7 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.x",
     "webpack": "^5.x",
-    "webpack-cli": "^5.x"
+    "webpack-cli": "^5.x",
+    "copy-webpack-plugin": "^11.x"
   }
 }

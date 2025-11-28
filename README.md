@@ -57,17 +57,33 @@ Search for "Databricks Notebook Viewer" in the VS Code Extensions Marketplace.
 
 ### Configuration
 
-Configure the extension in VS Code settings:
+Configure the extension in VS Code settings (`Cmd+,` or `Ctrl+,`):
 
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `databricks-notebook.autoOpenNotebooks` | `false` | Automatically open detected Databricks notebooks in notebook view |
+| `databricks-notebook.showNotification` | `true` | Show notification prompt when a Databricks notebook is detected |
+
+**Example settings.json:**
 ```json
 {
-  "databricks-notebook.autoOpenNotebooks": false,
+  "databricks-notebook.autoOpenNotebooks": true,
   "databricks-notebook.showNotification": true
 }
 ```
 
-- `autoOpenNotebooks`: Automatically open detected Databricks notebooks in notebook view
-- `showNotification`: Show notification when Databricks notebook is detected
+**Recommended configurations:**
+
+- **Manual mode** (default): `autoOpenNotebooks: false`, `showNotification: true`
+  - You'll see a prompt asking if you want to open as notebook
+
+- **Auto mode**: `autoOpenNotebooks: true`
+  - Databricks `.py` files automatically open as notebooks
+
+- **Silent mode**: `autoOpenNotebooks: false`, `showNotification: false`
+  - No automatic behavior; use right-click or Command Palette to open as notebook
+
+> **Note:** After changing these settings, you may need to reload VS Code (`Cmd+Shift+P` → "Developer: Reload Window") for the changes to take effect on already-opened files.
 
 ## Databricks .py Format
 

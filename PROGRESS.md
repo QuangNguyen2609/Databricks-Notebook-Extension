@@ -68,7 +68,58 @@ This VS Code extension renders Databricks `.py` notebook files as proper noteboo
 
 ---
 
-### Phase 3: CI/CD Pipeline
+### Phase 3: Toggle View Feature
+
+#### View Source Command (`databricks-notebook.openAsText`)
+- [x] **Toggle between notebook and raw text view**: Switch from rendered notebook back to raw `.py` file
+- [x] **Session-based tracking**: Closing and reopening still auto-opens as notebook
+- [x] **View column preservation**: Opens in same editor position
+- [x] **Editor title button**: Shows `$(code)` icon when viewing as notebook
+- [x] **Tab close cleanup**: Automatically clears "view as raw" flag when tab is closed
+
+---
+
+### Phase 4: Python Kernel Integration
+
+#### Kernel Manager (`src/kernels/kernelManager.ts`)
+- [x] Discovers Python environments via `ms-python.python` extension API
+- [x] Creates one `NotebookController` per Python interpreter
+- [x] VS Code's native kernel picker shows all available interpreters
+- [x] Refreshes controllers when environments change
+- [x] Registers kernel commands (restart, interrupt)
+
+#### Persistent Python Executor (`src/kernels/persistentExecutor.ts`)
+- [x] Long-running Python subprocess for state persistence
+- [x] Variables persist between cell executions (like Jupyter)
+- [x] JSON protocol communication via stdin/stdout
+- [x] Support for reset, interrupt, and ping commands
+- [x] Shows spark initialization status on kernel start
+
+#### Python Kernel Controller (`src/kernels/pythonKernelController.ts`)
+- [x] Implements `vscode.NotebookController` for each Python interpreter
+- [x] Executes Python cells with output capture
+- [x] **SQL cell execution**: Auto-wraps SQL in `spark.sql()` for execution
+- [x] **Shell cell execution**: Auto-wraps shell commands in `subprocess.run()`
+- [x] Informational messages for non-executable cells (Scala, R, %run, %fs)
+- [x] Execution order tracking
+
+#### Python Kernel Runner (`src/python/kernel_runner.py`)
+- [x] Persistent namespace for variable storage
+- [x] JSON-based request/response protocol
+- [x] Stdout/stderr capture
+- [x] Exception handling with traceback
+- [x] **Databricks Connect auto-initialization**:
+  - Auto-detects profile from `~/.databrickscfg`
+  - Reads OAuth tokens from `~/.databricks/token-cache.json` (for `auth_type=databricks-cli`)
+  - Supports serverless compute (`.serverless(True)`)
+  - Falls back to PySpark if Databricks Connect unavailable
+
+#### Configuration
+- [x] `databricks-notebook.pythonExecutionTimeout`: Cell execution timeout
+
+---
+
+### Phase 5: CI/CD Pipeline
 
 #### GitHub Actions Workflow (`.github/workflows/ci.yml`)
 - [x] Multi-platform testing: Ubuntu, Windows, macOS
@@ -89,6 +140,21 @@ This VS Code extension renders Databricks `.py` notebook files as proper noteboo
 - [x] `npm run ci` - Run all checks locally
 - [x] `npm run compile` - Build with webpack
 - [x] `npm run package` - Production build
+
+---
+
+### Phase 6: Round-trip Preservation
+
+#### Parser Improvements (`src/parser.ts`)
+- [x] **Bare `# MAGIC` handling**: Lines with `# MAGIC` (no trailing space) correctly render as blank lines in markdown
+- [x] **Original lines preservation**: Store original raw lines for each cell during parsing
+- [x] **Smart serialization**: Use original lines if cell content unchanged, only re-serialize modified cells
+- [x] **Minimal git diffs**: Unchanged cells produce no git changes when file is saved
+
+#### Serializer Improvements (`src/serializer.ts`)
+- [x] **Store original content in metadata**: Preserve `originalLines` and `originalContent` through VS Code's notebook API
+- [x] **Change detection**: Compare current content with original to detect modifications
+- [x] **Format preservation**: Magic commands like `%sql`, `%md` stay on their own line with content below
 
 ---
 
@@ -113,15 +179,24 @@ This VS Code extension renders Databricks `.py` notebook files as proper noteboo
 
 ```
 src/
-├── extension.ts     # Extension entry point, command registration
-├── serializer.ts    # NotebookSerializer for VS Code integration
-├── parser.ts        # Databricks .py format parser
-├── controller.ts    # NotebookController for execution
-├── types.ts         # TypeScript interfaces
+├── extension.ts              # Extension entry point, command registration
+├── serializer.ts             # NotebookSerializer for VS Code integration
+├── parser.ts                 # Databricks .py format parser
+├── types.ts                  # TypeScript interfaces
+├── kernels/
+│   ├── index.ts              # Kernel module exports
+│   ├── kernelManager.ts      # Manages multiple Python kernel controllers
+│   ├── pythonKernelController.ts  # NotebookController per interpreter
+│   └── persistentExecutor.ts # Persistent Python process manager
+├── utils/
+│   ├── pythonExtensionApi.ts # Python extension API wrapper
+│   └── outputHandler.ts      # Execution output conversion
+├── python/
+│   └── kernel_runner.py      # Python script for persistent execution
 └── test/
-    ├── parser.test.ts    # Comprehensive parser tests
-    ├── runTest.ts        # Test runner
-    └── suite/index.ts    # Test suite configuration
+    ├── parser.test.ts        # Comprehensive parser tests
+    ├── runTest.ts            # Test runner
+    └── suite/index.ts        # Test suite configuration
 ```
 
 ---
@@ -164,28 +239,55 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 1. **Brief flash on auto-open**: The text editor briefly appears before being replaced. This is unavoidable because VS Code's `onDidOpenTextDocument` fires after the editor opens.
 
-2. **No execution support**: The controller shows informational messages but doesn't execute code. Integration with Databricks Connect could be added in the future.
+2. **Basic output only**: Python execution captures stdout/stderr but doesn't support rich outputs (matplotlib plots, DataFrames) yet.
 
-3. **No syntax validation**: The parser doesn't validate that the content within cells is valid code.
+3. **Non-Python cells**: SQL, Scala, and R cells show informational messages but require Databricks runtime for execution.
+
+4. **No syntax validation**: The parser doesn't validate that the content within cells is valid code.
+
+5. **Kernel restart required**: To clear variables, the kernel must be restarted.
 
 ---
 
 ## Future Enhancements
 
-- [ ] Databricks Connect integration for cell execution
+- [x] ~~Databricks Connect integration for cell execution~~ Python kernel execution implemented
+- [x] ~~%sql magic execution via spark.sql()~~ SQL cells auto-wrap in spark.sql()
+- [x] ~~Databricks Connect integration for Spark operations~~ Auto-initializes with serverless
+- [x] ~~Git integration for better notebook diffs~~ Round-trip preservation minimizes diffs
+- [ ] Rich output support (matplotlib, DataFrames, HTML)
 - [ ] Cluster selection UI
-- [ ] Output caching
 - [ ] Cell folding
 - [ ] Table of contents from markdown headers
 - [ ] Export to Jupyter `.ipynb`
 - [ ] Diff view for notebook versions
-- [ ] Git integration for better notebook diffs
+- [ ] Variable explorer panel
 
 ---
 
 ## Version History
 
-### v0.0.1 (Current)
+### v0.0.3 (Current)
+- **Databricks Connect Integration**: Auto-initializes SparkSession on kernel start
+  - Reads OAuth tokens from `~/.databricks/token-cache.json`
+  - Supports `auth_type=databricks-cli` profiles
+  - Uses serverless compute by default
+- **SQL Cell Execution**: SQL cells automatically wrapped in `spark.sql()` for execution
+- **Shell Cell Execution**: Shell cells wrapped in `subprocess.run()` for local execution
+- **Round-trip Preservation**: Unchanged cells remain exactly as original (no git diff noise)
+  - Original lines stored in cell metadata
+  - Only modified cells are re-serialized
+- **Parser Fixes**: Bare `# MAGIC` lines (no trailing space) render as blank lines correctly
+
+### v0.0.2
+- **Toggle View Feature**: Switch between notebook and raw text view with "View Source" command
+- **Python Kernel Integration**: Execute Python cells with VS Code's kernel picker
+- **Persistent Execution State**: Variables persist between cells like Jupyter
+- **Python Extension Integration**: Discovers all Python environments automatically
+- New commands: `Restart Kernel`, `Interrupt Kernel`
+- Requires `ms-python.python` extension
+
+### v0.0.1
 - Initial implementation
 - Full parser for Databricks .py format
 - VS Code Notebook API integration

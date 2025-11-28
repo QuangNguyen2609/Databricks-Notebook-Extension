@@ -19,6 +19,7 @@ import {
 const NOTEBOOK_HEADER = '# Databricks notebook source';
 const CELL_DELIMITER = '# COMMAND ----------';
 const MAGIC_PREFIX = '# MAGIC ';
+const MAGIC_PREFIX_BARE = '# MAGIC'; // For lines with no content after MAGIC
 const TITLE_PREFIX = '# DBTITLE ';
 
 /**
@@ -68,34 +69,49 @@ export function parseNotebook(content: string): ParsedNotebook | null {
   const lines = content.split('\n');
   const cells: DatabricksCell[] = [];
 
-  // Skip header line
-  let currentCellLines: string[] = [];
-  let startIndex = 1;
-
-  // Skip empty lines after header
-  while (startIndex < lines.length && lines[startIndex].trim() === '') {
-    startIndex++;
-  }
-
-  for (let i = startIndex; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.trim() === CELL_DELIMITER) {
-      if (currentCellLines.length > 0) {
-        const cell = parseCell(currentCellLines);
-        if (cell) {
-          cells.push(cell);
-        }
-      }
-      currentCellLines = [];
-    } else {
-      currentCellLines.push(line);
+  // Find all cell boundaries (delimiter positions)
+  const delimiterPositions: number[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === CELL_DELIMITER) {
+      delimiterPositions.push(i);
     }
   }
 
-  // Don't forget the last cell
-  if (currentCellLines.length > 0) {
-    const cell = parseCell(currentCellLines);
+  // Check if there's content before the first delimiter (cell without leading delimiter)
+  const firstDelimiterPos = delimiterPositions.length > 0 ? delimiterPositions[0] : lines.length;
+
+  // Collect lines before first delimiter (after header)
+  const preDelimiterLines: string[] = [];
+  for (let i = 1; i < firstDelimiterPos; i++) {
+    preDelimiterLines.push(lines[i]);
+  }
+
+  // Check if there's actual content (not just blank lines)
+  const hasPreDelimiterContent = preDelimiterLines.some(line => line.trim() !== '');
+
+  if (hasPreDelimiterContent) {
+    // Parse the first cell (no delimiter before it)
+    const cell = parseCell(preDelimiterLines, preDelimiterLines);
+    if (cell) {
+      cells.push(cell);
+    }
+  }
+
+  // Parse each cell - include everything from delimiter to next delimiter
+  for (let i = 0; i < delimiterPositions.length; i++) {
+    const startPos = delimiterPositions[i];
+    const endPos = i + 1 < delimiterPositions.length ? delimiterPositions[i + 1] : lines.length;
+
+    // Collect all lines for this cell (including delimiter and blanks)
+    const cellRawLines: string[] = [];
+    for (let j = startPos; j < endPos; j++) {
+      cellRawLines.push(lines[j]);
+    }
+
+    // Extract content lines (skip delimiter line)
+    const contentLines = cellRawLines.slice(1);
+
+    const cell = parseCell(contentLines, cellRawLines);
     if (cell) {
       cells.push(cell);
     }
@@ -109,10 +125,11 @@ export function parseNotebook(content: string): ParsedNotebook | null {
 
 /**
  * Parse a single cell from its lines
- * @param lines - The lines comprising the cell
+ * @param lines - The content lines (after delimiter)
+ * @param rawLines - The raw lines including delimiter (for round-trip preservation)
  * @returns Parsed cell or null if empty
  */
-function parseCell(lines: string[]): DatabricksCell | null {
+function parseCell(lines: string[], rawLines?: string[]): DatabricksCell | null {
   // Create a copy to avoid mutating the original
   const cellLines = [...lines];
 
@@ -157,15 +174,15 @@ function parseCell(lines: string[]): DatabricksCell | null {
       content: '',
       title,
       language: 'python',
-      originalLines: lines,
+      originalLines: rawLines || lines,
     };
   }
 
   // Check if this is a MAGIC cell
   const firstContentLine = contentLines[0];
 
-  if (firstContentLine.startsWith(MAGIC_PREFIX)) {
-    return parseMagicCell(contentLines, title, lines);
+  if (firstContentLine.startsWith(MAGIC_PREFIX) || firstContentLine === MAGIC_PREFIX_BARE) {
+    return parseMagicCell(contentLines, title, rawLines || lines);
   }
 
   // Regular Python cell
@@ -174,7 +191,7 @@ function parseCell(lines: string[]): DatabricksCell | null {
     content: contentLines.join('\n'),
     title,
     language: 'python',
-    originalLines: lines,
+    originalLines: rawLines || lines,
   };
 }
 
@@ -210,24 +227,24 @@ function parseMagicCell(
     if (line.startsWith(MAGIC_PREFIX)) {
       return line.substring(MAGIC_PREFIX.length);
     }
+    // Handle bare "# MAGIC" with no trailing space (blank line in markdown)
+    if (line === MAGIC_PREFIX_BARE) {
+      return '';
+    }
     return line;
   });
 
   // Process based on magic command type
   if (magicCommand === '%md' || magicCommand === '%md-sandbox') {
-    // For markdown, remove the %md from first line
+    // For markdown, remove the %md from first line (don't show it)
     contentLines[0] = contentLines[0].replace(magicCommand, '').trim();
     // Remove empty first line if exists
     if (contentLines[0] === '') {
       contentLines.shift();
     }
-  } else if (magicCommand) {
-    // For other magics, remove the command from first line
-    contentLines[0] = contentLines[0].replace(magicCommand, '').trim();
-    if (contentLines[0] === '') {
-      contentLines.shift();
-    }
   }
+  // For all other magic commands (%sql, %run, %python, etc.), keep them visible
+  // Don't remove the magic command from content
 
   return {
     type: cellInfo.type,
@@ -241,16 +258,27 @@ function parseMagicCell(
 
 /**
  * Serialize cells back to Databricks .py format
+ *
+ * Key principle: If a cell's content hasn't changed, use the original lines exactly.
+ * This prevents unnecessary git diffs from formatting changes.
+ *
  * @param cells - The cells to serialize
  * @returns The serialized notebook content
  */
 export function serializeNotebook(cells: DatabricksCell[]): string {
-  const lines: string[] = [NOTEBOOK_HEADER, ''];
+  const lines: string[] = [NOTEBOOK_HEADER];
 
-  cells.forEach((cell, index) => {
-    if (index > 0) {
-      lines.push('', CELL_DELIMITER, '');
+  cells.forEach((cell) => {
+    // If cell has originalLines (content unchanged), use them directly
+    // originalLines includes the delimiter, so just append as-is
+    if (cell.originalLines && cell.originalLines.length > 0) {
+      cell.originalLines.forEach(line => lines.push(line));
+      return;
     }
+
+    // Cell was modified - need to re-serialize
+    // Don't add blank before delimiter - previous cell's originalLines includes trailing blanks
+    lines.push(CELL_DELIMITER, '');
 
     // Add title if present
     if (cell.title) {
@@ -261,16 +289,24 @@ export function serializeNotebook(cells: DatabricksCell[]): string {
       // Plain Python - no MAGIC needed
       lines.push(cell.content);
     } else if (cell.type === 'markdown') {
-      // Markdown cell
+      // Markdown cell - %md on its own line, content on subsequent lines
       lines.push(`${MAGIC_PREFIX}%md`);
-      cell.content.split('\n').forEach((line) => {
+      // Split content and remove trailing empty lines to avoid extra blank MAGIC lines
+      const contentLines = cell.content.split('\n');
+      while (contentLines.length > 0 && contentLines[contentLines.length - 1].trim() === '') {
+        contentLines.pop();
+      }
+      contentLines.forEach((line) => {
         lines.push(`${MAGIC_PREFIX}${line}`);
       });
     } else {
       // Other magic types (sql, scala, shell, etc.)
-      const magicCmd = getMagicCommandForType(cell.type, cell.metadata?.magicCommand);
-      lines.push(`${MAGIC_PREFIX}${magicCmd}`);
-      cell.content.split('\n').forEach((line) => {
+      // Content already includes the magic command, just add MAGIC prefix
+      const contentLines = cell.content.split('\n');
+      while (contentLines.length > 0 && contentLines[contentLines.length - 1].trim() === '') {
+        contentLines.pop();
+      }
+      contentLines.forEach((line) => {
         lines.push(`${MAGIC_PREFIX}${line}`);
       });
     }

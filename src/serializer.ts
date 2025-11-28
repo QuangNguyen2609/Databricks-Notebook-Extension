@@ -74,10 +74,13 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
     const cellData = new vscode.NotebookCellData(kind, cell.content, cell.language);
 
     // Store metadata for round-trip preservation
+    // Include originalLines and originalContent so we can detect changes
     cellData.metadata = {
       databricksType: cell.type,
       magicCommand: cell.metadata?.magicCommand,
       title: cell.title,
+      originalLines: cell.originalLines,
+      originalContent: cell.content,
     };
 
     return cellData;
@@ -101,12 +104,40 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
       type = 'code';
     }
 
+    // Get original lines and content from metadata
+    const originalLines = Array.isArray(metadata.originalLines)
+      ? metadata.originalLines as string[]
+      : [];
+    const originalContent = typeof metadata.originalContent === 'string'
+      ? metadata.originalContent
+      : null;
+
+    // Check if content has changed (normalize whitespace for comparison)
+    // This prevents false positives from whitespace differences
+    const normalizeForComparison = (s: string) => {
+      return s
+        .replace(/\r\n/g, '\n')        // Normalize line endings
+        .replace(/[ \t]+$/gm, '')      // Remove trailing spaces from each line
+        .replace(/\n+$/, '')           // Remove trailing newlines
+        .replace(/^\n+/, '')           // Remove leading newlines
+        .trim();
+    };
+    const contentChanged = originalContent === null ||
+      normalizeForComparison(originalContent) !== normalizeForComparison(cell.value);
+
+    // Debug: log if content changed unexpectedly
+    if (contentChanged && originalContent !== null) {
+      console.log('[Serializer] Content changed for cell type:', type);
+      console.log('[Serializer] Original length:', originalContent.length, 'New length:', cell.value.length);
+    }
+
     return {
       type,
       content: cell.value,
       title: typeof metadata.title === 'string' ? metadata.title : undefined,
       language: cell.languageId,
-      originalLines: [],
+      // Only preserve originalLines if content hasn't changed
+      originalLines: contentChanged ? [] : originalLines,
       metadata: {
         magicCommand:
           typeof metadata.magicCommand === 'string'

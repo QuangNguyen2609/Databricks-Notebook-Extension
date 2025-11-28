@@ -8,10 +8,17 @@
 
 import * as vscode from 'vscode';
 import { DatabricksNotebookSerializer, checkIsDatabricksNotebook } from './serializer';
-import { DatabricksNotebookController } from './controller';
+import { KernelManager } from './kernels';
+
+// Global kernel manager instance
+let kernelManager: KernelManager | undefined;
 
 // Track documents currently being processed to avoid race conditions
 const processingDocuments = new Set<string>();
+
+// Track URIs currently being viewed as raw text (session-based)
+// This prevents auto-open from re-opening them as notebooks during the same session
+const viewingAsRawText = new Set<string>();
 
 // Databricks notebook header constant
 const DATABRICKS_HEADER = '# Databricks notebook source';
@@ -20,7 +27,7 @@ const DATABRICKS_HEADER = '# Databricks notebook source';
  * Extension activation
  * Called when VS Code activates the extension
  */
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('Databricks Notebook Viewer is now active');
 
   // Register the notebook serializer
@@ -34,9 +41,19 @@ export function activate(context: vscode.ExtensionContext): void {
     )
   );
 
-  // Register the notebook controller (optional execution support)
-  const controller = new DatabricksNotebookController();
-  context.subscriptions.push(controller);
+  // Initialize kernel manager for Python execution support
+  kernelManager = new KernelManager(context.extensionPath);
+  context.subscriptions.push(kernelManager);
+
+  // Initialize asynchronously (discovers Python environments)
+  kernelManager.initialize().then(() => {
+    console.log(`Kernel manager initialized with ${kernelManager?.getControllerCount()} controllers`);
+  }).catch((error) => {
+    console.error('Failed to initialize kernel manager:', error);
+  });
+
+  // Register kernel-related commands
+  kernelManager.registerCommands(context);
 
   // Register command to open .py file as Databricks notebook
   context.subscriptions.push(
@@ -46,6 +63,28 @@ export function activate(context: vscode.ExtensionContext): void {
         await openAsNotebook(uri);
       }
     )
+  );
+
+  // Register command to view notebook as raw text (View Source)
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'databricks-notebook.openAsText',
+      async (uri?: vscode.Uri) => {
+        await openAsRawText(uri);
+      }
+    )
+  );
+
+  // Clear viewingAsRawText flag when text editor tab is closed
+  // This allows the file to be auto-opened as notebook when reopened
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs((event) => {
+      for (const closedTab of event.closed) {
+        if (closedTab.input instanceof vscode.TabInputText) {
+          viewingAsRawText.delete(closedTab.input.uri.toString());
+        }
+      }
+    })
   );
 
   // Auto-detect Databricks notebooks when opening .py files
@@ -92,6 +131,50 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
 }
 
 /**
+ * Handle the "View Source" command - open notebook as raw text
+ * @param uri - The file URI to open (optional, uses active notebook if not provided)
+ */
+async function openAsRawText(uri?: vscode.Uri): Promise<void> {
+  // Get URI from parameter or active notebook editor
+  const fileUri = uri || vscode.window.activeNotebookEditor?.notebook.uri;
+
+  if (!fileUri) {
+    vscode.window.showErrorMessage('No notebook selected');
+    return;
+  }
+
+  const uriString = fileUri.toString();
+
+  // Mark this URI as being viewed as raw text (session-based)
+  // This is cleared when the text editor tab is closed
+  viewingAsRawText.add(uriString);
+
+  // Find the current notebook tab to get view column
+  const tabInfo = findNotebookTab(uriString);
+  const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
+
+  try {
+    // Close the notebook tab first (same pattern as openAsNotebook)
+    if (tabInfo) {
+      await vscode.window.tabGroups.close(tabInfo.tab);
+    }
+
+    // Open as default text editor
+    // Using 'default' as the editor ID opens with the standard text editor
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      fileUri,
+      'default',
+      viewColumn
+    );
+  } catch (error) {
+    // Clean up on error
+    viewingAsRawText.delete(uriString);
+    vscode.window.showErrorMessage(`Failed to open as text: ${error}`);
+  }
+}
+
+/**
  * Quick synchronous check if document is a Databricks notebook
  * Uses document content already in memory - much faster than file I/O
  * @param document - The text document to check
@@ -125,6 +208,25 @@ function findTextEditorTab(uriString: string): { tab: vscode.Tab; viewColumn: vs
 }
 
 /**
+ * Find the tab and view column for a notebook document
+ * @param uriString - The URI string of the document
+ * @returns Object with tab and viewColumn, or null if not found
+ */
+function findNotebookTab(uriString: string): { tab: vscode.Tab; viewColumn: vscode.ViewColumn } | null {
+  for (const tabGroup of vscode.window.tabGroups.all) {
+    for (const tab of tabGroup.tabs) {
+      if (
+        tab.input instanceof vscode.TabInputNotebook &&
+        tab.input.uri.toString() === uriString
+      ) {
+        return { tab, viewColumn: tabGroup.viewColumn };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Handle document open event to detect Databricks notebooks
  * Seamlessly replaces text editor with notebook view
  * @param document - The opened document
@@ -139,6 +241,11 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
 
   // Skip if already processing this document (avoid race conditions)
   if (processingDocuments.has(uriString)) {
+    return;
+  }
+
+  // Skip if user explicitly chose to view as raw text
+  if (viewingAsRawText.has(uriString)) {
     return;
   }
 
@@ -228,4 +335,8 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
 export function deactivate(): void {
   console.log('Databricks Notebook Viewer is now deactivated');
   processingDocuments.clear();
+  viewingAsRawText.clear();
+
+  // Kernel manager is disposed via context.subscriptions, but clear reference
+  kernelManager = undefined;
 }
