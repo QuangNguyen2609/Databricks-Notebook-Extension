@@ -31,8 +31,7 @@ A VS Code extension that renders Databricks `.py` notebook files as proper noteb
 
 1. Build the extension:
    ```bash
-   npm install
-   npm run package
+   bash build.sh
    ```
 
 2. Install the VSIX:
