@@ -28,9 +28,10 @@ export class OutputHandler {
     }
 
     // Handle stderr (but not if it's part of an error - avoid duplication)
+    // Use text/plain for better scrollability support in VS Code
     if (result.stderr && result.stderr.trim() && result.success) {
       outputs.push(new vscode.NotebookCellOutput([
-        vscode.NotebookCellOutputItem.stderr(result.stderr)
+        vscode.NotebookCellOutputItem.text(result.stderr, 'text/plain')
       ]));
     }
 
@@ -45,7 +46,7 @@ export class OutputHandler {
 
   /**
    * Create an error output from an execution result
-   * Uses stderr for better scrollability and readability
+   * Uses text/plain for better scrollability support in VS Code's "View as scrollable element"
    */
   private createErrorOutput(result: ExecutionResult): vscode.NotebookCellOutput {
     const errorName = result.errorType || 'Error';
@@ -57,9 +58,9 @@ export class OutputHandler {
       errorText = `${errorName}: ${errorMessage}\n    at <cell>:${result.lineNumber}`;
     }
 
-    // Use stderr output for errors - this allows full scrolling
+    // Use text/plain for errors - this enables VS Code's scrollable element feature
     return new vscode.NotebookCellOutput([
-      vscode.NotebookCellOutputItem.stderr(errorText)
+      vscode.NotebookCellOutputItem.text(errorText, 'text/plain')
     ]);
   }
 

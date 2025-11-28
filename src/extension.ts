@@ -237,6 +237,23 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     return;
   }
 
+  // Skip non-file URIs (git diffs, etc.) - only auto-open actual file:// URIs
+  if (document.uri.scheme !== 'file') {
+    return;
+  }
+
+  // Skip if opened in a diff editor tab
+  const isDiffTab = vscode.window.tabGroups.all.some(group =>
+    group.tabs.some(tab =>
+      (tab.input instanceof vscode.TabInputTextDiff || tab.input instanceof vscode.TabInputNotebookDiff) &&
+      (tab.input.original.toString() === document.uri.toString() ||
+       tab.input.modified.toString() === document.uri.toString())
+    )
+  );
+  if (isDiffTab) {
+    return;
+  }
+
   const uriString = document.uri.toString();
 
   // Skip if already processing this document (avoid race conditions)

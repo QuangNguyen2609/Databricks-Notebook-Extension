@@ -222,7 +222,7 @@ _df.show()`.trim();
    */
   private wrapShellCode(shellCode: string): string {
     // Strip %sh prefix if present
-    let cleanCode = this.stripMagicPrefix(shellCode, '%sh');
+    const cleanCode = this.stripMagicPrefix(shellCode, '%sh');
 
     // Escape the shell code for Python string
     const escapedCode = cleanCode.replace(/\\/g, '\\\\').replace(/"/g, '\\"');

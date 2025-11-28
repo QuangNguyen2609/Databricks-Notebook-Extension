@@ -112,7 +112,6 @@ This VS Code extension renders Databricks `.py` notebook files as proper noteboo
   - Auto-detects profile from `~/.databrickscfg`
   - Reads OAuth tokens from `~/.databricks/token-cache.json` (for `auth_type=databricks-cli`)
   - Supports serverless compute (`.serverless(True)`)
-  - Falls back to PySpark if Databricks Connect unavailable
 
 #### Configuration
 - [x] `databricks-notebook.pythonExecutionTimeout`: Cell execution timeout
@@ -255,19 +254,28 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 - [x] ~~%sql magic execution via spark.sql()~~ SQL cells auto-wrap in spark.sql()
 - [x] ~~Databricks Connect integration for Spark operations~~ Auto-initializes with serverless
 - [x] ~~Git integration for better notebook diffs~~ Round-trip preservation minimizes diffs
+- [x] ~~Scrollable output for large errors~~ Enabled via `notebook.output.scrolling` default
 - [ ] Rich output support (matplotlib, DataFrames, HTML)
 - [ ] Cluster selection UI
 - [ ] Cell folding
 - [ ] Table of contents from markdown headers
 - [ ] Export to Jupyter `.ipynb`
-- [ ] Diff view for notebook versions
 - [ ] Variable explorer panel
 
 ---
 
 ## Version History
 
-### v0.0.3 (Current)
+### v0.0.4 (Current)
+- **Scrollable Output Fix**: Large outputs now properly scrollable
+  - Sets `notebook.output.scrolling: true` by default via `configurationDefaults`
+  - Works around VS Code bug where "View as scrollable element" link was non-functional
+  - Outputs use `text/plain` MIME type for better compatibility
+- **Git Diff Fix**: Prevent multiple tabs from opening when viewing git diffs
+  - Skip auto-open for non-file URIs (git:, vscode-diff:, etc.)
+  - Skip auto-open when document is part of a diff editor tab
+
+### v0.0.3
 - **Databricks Connect Integration**: Auto-initializes SparkSession on kernel start
   - Reads OAuth tokens from `~/.databricks/token-cache.json`
   - Supports `auth_type=databricks-cli` profiles

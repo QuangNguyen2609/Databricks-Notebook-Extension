@@ -109,7 +109,15 @@
           "type": "number",
           "default": 60000,
           "description": "Timeout for Python cell execution in milliseconds"
+        },
+        "databricks-notebook.enableScrollableOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable scrollable output for large cell outputs (sets notebook.output.scrolling)"
         }
+      },
+      "configurationDefaults": {
+        "notebook.output.scrolling": true
       }
     }
   },
