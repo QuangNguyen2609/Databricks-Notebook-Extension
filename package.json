@@ -1,0 +1,158 @@
+{
+  "name": "databricks-notebook-viewer",
+  "displayName": "Databricks Notebook Viewer",
+  "description": "Visualize Databricks .py notebooks with proper cell rendering, syntax highlighting, and markdown support",
+  "version": "0.0.1",
+  "publisher": "databricks-notebook-viewer",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Notebooks",
+    "Data Science",
+    "Visualization"
+  ],
+  "keywords": [
+    "databricks",
+    "notebook",
+    "spark",
+    "pyspark",
+    "data engineering",
+    "jupyter"
+  ],
+  "activationEvents": [],
+  "extensionDependencies": [
+    "ms-python.python"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "notebooks": [
+      {
+        "type": "databricks-notebook",
+        "displayName": "Databricks Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.py"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "databricks-notebook.openAsNotebook",
+        "title": "Open as Databricks Notebook",
+        "category": "Databricks",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "databricks-notebook.openAsText",
+        "title": "View Source",
+        "category": "Databricks",
+        "icon": "$(code)"
+      },
+      {
+        "command": "databricks-notebook.restartKernel",
+        "title": "Restart Kernel",
+        "category": "Databricks",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "databricks-notebook.interruptKernel",
+        "title": "Interrupt Kernel",
+        "category": "Databricks",
+        "icon": "$(debug-stop)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "databricks-notebook.openAsNotebook",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "databricks-notebook.openAsNotebook",
+          "when": "resourceExtname == .py && !notebookEditorFocused",
+          "group": "navigation"
+        },
+        {
+          "command": "databricks-notebook.openAsText",
+          "when": "resourceExtname == .py && notebookEditorFocused && notebookType == 'databricks-notebook'",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "databricks-notebook.openAsNotebook",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Databricks Notebook Viewer",
+      "properties": {
+        "databricks-notebook.autoOpenNotebooks": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open detected Databricks notebooks in notebook view"
+        },
+        "databricks-notebook.showNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notification when Databricks notebook is detected"
+        },
+        "databricks-notebook.pythonExecutionTimeout": {
+          "type": "number",
+          "default": 60000,
+          "description": "Timeout for Python cell execution in milliseconds"
+        },
+        "databricks-notebook.enableScrollableOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable scrollable output for large cell outputs (sets notebook.output.scrolling)"
+        }
+      },
+      "configurationDefaults": {
+        "notebook.output.scrolling": true
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext ts",
+    "lint:fix": "eslint src --ext ts --fix",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "mocha --require ts-node/register src/test/**/*.test.ts",
+    "test:coverage": "nyc --reporter=lcov --reporter=text npm run test:unit",
+    "ci": "npm run type-check && npm run lint && npm run test:unit && npm run compile"
+  },
+  "devDependencies": {
+    "@istanbuljs/nyc-config-typescript": "^1.0.2",
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.x",
+    "@typescript-eslint/parser": "^6.x",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.x",
+    "eslint": "^8.x",
+    "glob": "^13.0.0",
+    "mocha": "^10.2.0",
+    "nyc": "^15.x",
+    "ts-loader": "^9.x",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.x",
+    "webpack": "^5.x",
+    "webpack-cli": "^5.x",
+    "copy-webpack-plugin": "^11.x"
+  }
+}
