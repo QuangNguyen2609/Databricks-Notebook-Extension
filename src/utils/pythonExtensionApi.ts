@@ -122,7 +122,7 @@ export class PythonExtensionApi {
     try {
       // Trigger refresh if available (Python extension API v2)
       if (this.pythonApi?.environments?.refreshEnvironments) {
-        console.log('[PythonExtensionApi] Triggering environment refresh...');
+        console.debug('[PythonExtensionApi] Triggering environment refresh...');
         await this.pythonApi.environments.refreshEnvironments();
       }
     } catch (error) {
@@ -147,14 +147,28 @@ export class PythonExtensionApi {
       // Try new API first (environments.known)
       if (this.pythonApi?.environments?.known) {
         const known = this.pythonApi.environments.known;
+        console.debug(`[PythonExtensionApi] Python API returned ${Array.isArray(known) ? known.length : 'unknown'} environments`);
 
         for (const env of known) {
+          console.debug(`[PythonExtensionApi] Raw env from API:`, JSON.stringify({
+            id: env?.id,
+            path: env?.path,
+            executablePath: env?.executable?.uri?.fsPath,
+            displayName: env?.displayName,
+            envType: env?.environment?.type,
+          }, null, 2));
+
           const pythonEnv = this.convertToPythonEnvironment(env);
           if (pythonEnv) {
+            console.debug(`[PythonExtensionApi] Converted to: ${pythonEnv.displayName} (${pythonEnv.path})`);
             environments.push(pythonEnv);
             seenPaths.add(this.normalizePath(pythonEnv.path));
+          } else {
+            console.debug(`[PythonExtensionApi] Failed to convert environment`);
           }
         }
+      } else {
+        console.debug(`[PythonExtensionApi] Python API environments.known not available`);
       }
 
       // Discover conda environments via conda command (works on all platforms)
@@ -206,7 +220,7 @@ export class PythonExtensionApi {
         const venvPath = path.join(folder.uri.fsPath, venvName, scriptsDir, pythonExe);
 
         if (this.fileExists(venvPath) && !seenPaths.has(this.normalizePath(venvPath))) {
-          console.log(`[PythonExtensionApi] Found workspace venv: ${venvPath}`);
+          console.debug(`[PythonExtensionApi] Found workspace venv: ${venvPath}`);
           const env = await this.createEnvironmentFromPath(venvPath, 'venv', `${venvName} (${folder.name})`);
           if (env) {
             environments.push(env);
@@ -251,7 +265,7 @@ export class PythonExtensionApi {
     for (const condaBase of condaLocations) {
       const pythonPath = path.join(condaBase, 'python.exe');
       if (this.fileExists(pythonPath) && !seenPaths.has(this.normalizePath(pythonPath))) {
-        console.log(`[PythonExtensionApi] Found conda base: ${pythonPath}`);
+        console.debug(`[PythonExtensionApi] Found conda base: ${pythonPath}`);
         const env = await this.createEnvironmentFromPath(pythonPath, 'conda', 'conda (base)');
         if (env) {
           environments.push(env);
@@ -267,7 +281,7 @@ export class PythonExtensionApi {
           for (const envDir of envDirs) {
             const envPythonPath = path.join(envsPath, envDir, 'python.exe');
             if (this.fileExists(envPythonPath) && !seenPaths.has(this.normalizePath(envPythonPath))) {
-              console.log(`[PythonExtensionApi] Found conda env: ${envPythonPath}`);
+              console.debug(`[PythonExtensionApi] Found conda env: ${envPythonPath}`);
               const env = await this.createEnvironmentFromPath(envPythonPath, 'conda', `conda (${envDir})`);
               if (env) {
                 environments.push(env);
@@ -290,7 +304,7 @@ export class PythonExtensionApi {
         for (const version of versions) {
           const versionPythonPath = path.join(pyenvVersionsPath, version, 'python.exe');
           if (this.fileExists(versionPythonPath) && !seenPaths.has(this.normalizePath(versionPythonPath))) {
-            console.log(`[PythonExtensionApi] Found pyenv version: ${versionPythonPath}`);
+            console.debug(`[PythonExtensionApi] Found pyenv version: ${versionPythonPath}`);
             const env = await this.createEnvironmentFromPath(versionPythonPath, 'pyenv', `pyenv (${version})`);
             if (env) {
               environments.push(env);
@@ -314,7 +328,7 @@ export class PythonExtensionApi {
 
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        console.log('[PythonExtensionApi] Conda discovery timed out');
+        console.debug('[PythonExtensionApi] Conda discovery timed out');
         resolve(environments);
       }, 10000);
 
@@ -337,7 +351,7 @@ export class PythonExtensionApi {
           clearTimeout(timeout);
 
           if (code !== 0 || !output) {
-            console.log('[PythonExtensionApi] Conda command failed or not available');
+            console.debug('[PythonExtensionApi] Conda command failed or not available');
             resolve(environments);
             return;
           }
@@ -346,7 +360,7 @@ export class PythonExtensionApi {
             const condaInfo = JSON.parse(output);
             const envPaths: string[] = condaInfo.envs || [];
 
-            console.log(`[PythonExtensionApi] Conda found ${envPaths.length} environments`);
+            console.debug(`[PythonExtensionApi] Conda found ${envPaths.length} environments`);
 
             for (const envPath of envPaths) {
               const pythonExe = process.platform === 'win32' ? 'python.exe' : 'python';
@@ -359,7 +373,7 @@ export class PythonExtensionApi {
                   envPath === condaInfo.root_prefix || envPath === condaInfo.conda_prefix;
                 const displayName = isBase ? 'base' : envName;
 
-                console.log(`[PythonExtensionApi] Found conda env via command: ${pythonPath} (${displayName})`);
+                console.debug(`[PythonExtensionApi] Found conda env via command: ${pythonPath} (${displayName})`);
                 const env = await this.createEnvironmentFromPath(pythonPath, 'conda', `conda (${displayName})`);
                 if (env) {
                   environments.push(env);
@@ -376,7 +390,7 @@ export class PythonExtensionApi {
 
         proc.on('error', (error) => {
           clearTimeout(timeout);
-          console.log('[PythonExtensionApi] Conda command not found:', error.message);
+          console.debug('[PythonExtensionApi] Conda command not found:', error.message);
           resolve(environments);
         });
       } catch (error) {

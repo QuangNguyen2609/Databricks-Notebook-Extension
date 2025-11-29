@@ -60,7 +60,7 @@ export class PythonKernelController implements vscode.Disposable {
     this.disposables.push(
       this.controller.onDidChangeSelectedNotebooks((event) => {
         if (event.selected) {
-          console.log(`[Kernel] Controller selected for: ${event.notebook.uri.toString()}`);
+          console.debug(`[Kernel] Controller selected for: ${event.notebook.uri.toString()}`);
         }
       })
     );
@@ -68,9 +68,26 @@ export class PythonKernelController implements vscode.Disposable {
 
   /**
    * Sanitize ID for use in controller ID
+   * Uses a hash of the full path to ensure uniqueness
    */
   private sanitizeId(id: string): string {
-    return id.replace(/[^a-zA-Z0-9-]/g, '-').substring(0, 50);
+    // Create a simple hash of the full path to ensure uniqueness
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      const char = id.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    const hashStr = Math.abs(hash).toString(36);
+
+    // Extract meaningful parts from the path for readability
+    const parts = id.split(/[/\\]/);
+    const filename = parts[parts.length - 1] || 'python';
+    const parentDir = parts[parts.length - 3] || ''; // e.g., ".venv" or "WindowsApps"
+
+    // Combine readable prefix with hash for uniqueness
+    const prefix = `${parentDir}-${filename}`.replace(/[^a-zA-Z0-9-]/g, '-').substring(0, 30);
+    return `${prefix}-${hashStr}`;
   }
 
   /**
@@ -132,7 +149,7 @@ export class PythonKernelController implements vscode.Disposable {
       // Get Databricks cell type from metadata
       const databricksType = cell.metadata?.databricksType as string | undefined;
 
-      console.log(`[Kernel] Executing cell: languageId=${languageId}, databricksType=${databricksType}`);
+      console.debug(`[Kernel] Executing cell: languageId=${languageId}, databricksType=${databricksType}`);
 
       // Check if this is a SQL cell that should be auto-wrapped with spark.sql()
       const isSqlCell = databricksType === 'sql' || languageId === 'sql';
@@ -153,7 +170,7 @@ export class PythonKernelController implements vscode.Disposable {
 
       // Get or create executor
       if (!this.executor) {
-        console.log(`[Kernel] Creating executor with Python: ${this.environment.path}`);
+        console.debug(`[Kernel] Creating executor with Python: ${this.environment.path}`);
         this.executor = new PersistentExecutor(
           this.environment.path,
           this.extensionPath,
@@ -167,11 +184,11 @@ export class PythonKernelController implements vscode.Disposable {
       if (isSqlCell) {
         // Wrap SQL in spark.sql() - execute and display results
         executableCode = this.wrapSqlCode(code);
-        console.log(`[Kernel] Wrapped SQL code for execution`);
+        console.debug(`[Kernel] Wrapped SQL code for execution`);
       } else if (isShellCell) {
         // Wrap shell commands in subprocess
         executableCode = this.wrapShellCode(code);
-        console.log(`[Kernel] Wrapped shell code for execution`);
+        console.debug(`[Kernel] Wrapped shell code for execution`);
       } else {
         // For Python cells, strip %python prefix if present
         executableCode = this.stripMagicPrefix(code, '%python');
@@ -248,7 +265,7 @@ export class PythonKernelController implements vscode.Disposable {
     // Check for Databricks cell type from metadata
     const databricksType = cell.metadata?.databricksType as string | undefined;
 
-    console.log(`[Kernel] Non-executable cell: languageId=${languageId}, databricksType=${databricksType}`);
+    console.debug(`[Kernel] Non-executable cell: languageId=${languageId}, databricksType=${databricksType}`);
 
     // Messages for different cell types that cannot be executed locally
     const messages: Record<string, string> = {

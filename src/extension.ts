@@ -122,9 +122,26 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
     }
   }
 
-  // Open as notebook
+  const uriString = fileUri.toString();
+
+  // Open as notebook - close existing text editor first for unified tab experience
   try {
-    await vscode.commands.executeCommand('vscode.openWith', fileUri, 'databricks-notebook');
+    // Find the current text editor tab to get view column and close it
+    const tabInfo = findTextEditorTab(uriString);
+    const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
+
+    // Close the text editor tab first to avoid two tabs
+    if (tabInfo) {
+      await vscode.window.tabGroups.close(tabInfo.tab);
+    }
+
+    // Open notebook in the same view column
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      fileUri,
+      'databricks-notebook',
+      viewColumn
+    );
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to open notebook: ${error}`);
   }

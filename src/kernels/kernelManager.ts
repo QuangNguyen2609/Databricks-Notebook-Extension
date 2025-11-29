@@ -43,7 +43,7 @@ export class KernelManager implements vscode.Disposable {
       return;
     }
 
-    console.log('[KernelManager] Initializing...');
+    console.debug('[KernelManager] Initializing...');
 
     // Initialize Python extension API
     const pythonAvailable = await this.pythonApi.initialize();
@@ -62,7 +62,7 @@ export class KernelManager implements vscode.Disposable {
     // Listen for environment changes
     this.disposables.push(
       this.pythonApi.onDidChangeEnvironments(async () => {
-        console.log('[KernelManager] Python environments changed, refreshing controllers...');
+        console.debug('[KernelManager] Python environments changed, refreshing controllers...');
         await this.refreshControllers();
       })
     );
@@ -70,13 +70,13 @@ export class KernelManager implements vscode.Disposable {
     // Listen for active environment changes
     this.disposables.push(
       this.pythonApi.onDidChangeActiveEnvironment(async () => {
-        console.log('[KernelManager] Active Python environment changed');
+        console.debug('[KernelManager] Active Python environment changed');
         // Could update preferred controller here
       })
     );
 
     this.initialized = true;
-    console.log(`[KernelManager] Initialized with ${this.controllers.size} controllers`);
+    console.debug(`[KernelManager] Initialized with ${this.controllers.size} controllers`);
   }
 
   /**
@@ -93,12 +93,12 @@ export class KernelManager implements vscode.Disposable {
     // Active environment path could be used for setting preferred controller
     const activeEnvPath = await this.pythonApi.getActiveEnvironmentPath();
 
-    console.log(`[KernelManager] Found ${environments.length} Python environments`);
-    console.log(`[KernelManager] Active environment: ${activeEnvPath || 'none'}`);
+    console.debug(`[KernelManager] Found ${environments.length} Python environments`);
+    console.debug(`[KernelManager] Active environment: ${activeEnvPath || 'none'}`);
 
     // Log each discovered environment
     for (const env of environments) {
-      console.log(`[KernelManager]   - ${env.displayName}: ${env.path}`);
+      console.debug(`[KernelManager]   - ${env.displayName}: ${env.path}`);
     }
 
     // Track which environments still exist
@@ -107,7 +107,7 @@ export class KernelManager implements vscode.Disposable {
     // Remove controllers for environments that no longer exist
     for (const [id, controller] of this.controllers) {
       if (!currentEnvIds.has(id)) {
-        console.log(`[KernelManager] Removing controller for: ${id}`);
+        console.debug(`[KernelManager] Removing controller for: ${id}`);
         controller.dispose();
         this.controllers.delete(id);
       }
@@ -116,7 +116,7 @@ export class KernelManager implements vscode.Disposable {
     // Create controllers for new environments
     for (const env of environments) {
       if (!this.controllers.has(env.id)) {
-        console.log(`[KernelManager] Creating controller for: ${env.displayName} (${env.path})`);
+        console.debug(`[KernelManager] Creating controller for: ${env.displayName} (${env.path})`);
         const controller = new PythonKernelController(
           env,
           this.notebookType,
