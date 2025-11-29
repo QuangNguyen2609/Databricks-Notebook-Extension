@@ -406,4 +406,366 @@ print("hello")
       assert.deepStrictEqual(types, ['markdown', 'code', 'sql']);
     });
   });
+
+  describe('Edge Cases - Empty and Whitespace', () => {
+    it('should handle notebook with only header', () => {
+      const content = '# Databricks notebook source';
+      const notebook = parseNotebook(content);
+      assert.ok(notebook);
+      assert.strictEqual(notebook?.cells.length, 0);
+    });
+
+    it('should handle notebook with empty cells', () => {
+      const content = `# Databricks notebook source
+
+# COMMAND ----------
+
+# COMMAND ----------
+
+print("hello")`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook);
+      // Empty cells are filtered out, only the cell with content remains
+      assert.strictEqual(notebook?.cells.length, 1);
+      assert.strictEqual(notebook?.cells[0].content, 'print("hello")');
+    });
+
+    it('should handle cells with only whitespace', () => {
+      const content = `# Databricks notebook source
+
+
+
+# COMMAND ----------
+
+print("hello")`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook);
+      assert.strictEqual(notebook?.cells.length, 1);
+    });
+
+    it('should handle multiple blank lines between cells', () => {
+      const content = `# Databricks notebook source
+
+print("cell1")
+
+
+
+# COMMAND ----------
+
+
+
+print("cell2")`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells.length, 2);
+      assert.strictEqual(notebook?.cells[0].content, 'print("cell1")');
+      assert.strictEqual(notebook?.cells[1].content, 'print("cell2")');
+    });
+  });
+
+  describe('Edge Cases - Magic Command Priority', () => {
+    it('should match %run before %r', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %run ./notebook`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells[0].type, 'run');
+      assert.ok(notebook?.cells[0].content.includes('%run'));
+    });
+
+    it('should match %r correctly when not %run', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %r
+# MAGIC x <- 1`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells[0].type, 'r');
+      assert.strictEqual(notebook?.cells[0].language, 'r');
+    });
+
+    it('should match %md-sandbox before %md', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %md-sandbox
+# MAGIC <style>custom</style>
+# MAGIC # Title`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells[0].type, 'markdown');
+      // Content should not include %md-sandbox
+      assert.ok(!notebook?.cells[0].content.includes('%md-sandbox'));
+    });
+  });
+
+  describe('Edge Cases - Special Characters', () => {
+    it('should preserve backslashes in Python code', () => {
+      const content = `# Databricks notebook source
+
+import re
+pattern = r'[a-z\\d]+'`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook?.cells[0].content.includes('\\d'));
+    });
+
+    it('should preserve backslashes in SQL cells', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %sql
+# MAGIC SELECT * FROM t WHERE col RLIKE '[\\d]+'`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook?.cells[0].content.includes('[\\d]'));
+    });
+
+    it('should preserve regex patterns in SQL', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %sql
+# MAGIC SELECT * FROM t WHERE col RLIKE '[^ A-Za-z0-9&\\'(),\\-./\\[\\]_:#]'`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook?.cells[0].content.includes('RLIKE'));
+      assert.ok(notebook?.cells[0].content.includes('[^'));
+    });
+
+    it('should preserve triple quotes in Python', () => {
+      const content = `# Databricks notebook source
+
+text = """
+multiline
+string
+"""`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook?.cells[0].content.includes('"""'));
+    });
+
+    it('should handle SQL with single quotes', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %sql
+# MAGIC SELECT * FROM t WHERE name = 'O\\'Brien'`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook?.cells[0].content.includes("O\\'Brien"));
+    });
+
+    it('should preserve unicode characters', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %md
+# MAGIC # Hello World \u4e16\u754c
+# MAGIC Emoji: \ud83d\ude00`;
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook?.cells[0].content.includes('\u4e16\u754c'));
+    });
+  });
+
+  describe('Edge Cases - DBTITLE Variations', () => {
+    it('should handle DBTITLE with special characters', () => {
+      const content = `# Databricks notebook source
+
+# DBTITLE 0,My "Special" Title: Test & More!
+print("hello")`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells[0].title, 'My "Special" Title: Test & More!');
+    });
+
+    it('should handle DBTITLE with empty content after', () => {
+      const content = `# Databricks notebook source
+
+# DBTITLE 0,Empty Cell Title`;
+
+      const notebook = parseNotebook(content);
+      // Cell with only title, treated as empty Python cell
+      assert.strictEqual(notebook?.cells[0].title, 'Empty Cell Title');
+      assert.strictEqual(notebook?.cells[0].type, 'code');
+    });
+
+    it('should handle DBTITLE followed by MAGIC command', () => {
+      const content = `# Databricks notebook source
+
+# DBTITLE 0,SQL Query
+# MAGIC %sql
+# MAGIC SELECT 1`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells[0].title, 'SQL Query');
+      assert.strictEqual(notebook?.cells[0].type, 'sql');
+    });
+  });
+
+  describe('Edge Cases - Bare MAGIC Lines', () => {
+    it('should handle bare # MAGIC (no trailing space) as blank line', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %md
+# MAGIC # Title
+# MAGIC
+# MAGIC Content after blank`;
+
+      const notebook = parseNotebook(content);
+      const lines = notebook?.cells[0].content.split('\n') || [];
+      // Should have an empty line between Title and Content
+      assert.ok(lines.some(line => line === ''));
+      assert.ok(lines.some(line => line.includes('Title')));
+      assert.ok(lines.some(line => line.includes('Content after blank')));
+    });
+  });
+
+  describe('Serialization Edge Cases', () => {
+    it('should serialize SQL cell with special characters', () => {
+      const cells = [
+        {
+          type: 'sql' as const,
+          content: "%sql\nSELECT * FROM t WHERE col RLIKE '[\\\\d]+'",
+          language: 'sql',
+          originalLines: [],
+        },
+      ];
+
+      const result = serializeNotebook(cells);
+      assert.ok(result.includes('# MAGIC %sql'));
+      assert.ok(result.includes('RLIKE'));
+    });
+
+    it('should serialize cell with unicode', () => {
+      const cells = [
+        {
+          type: 'markdown' as const,
+          content: '# Hello \u4e16\u754c',
+          language: 'markdown',
+          originalLines: [],
+        },
+      ];
+
+      const result = serializeNotebook(cells);
+      assert.ok(result.includes('\u4e16\u754c'));
+    });
+
+    it('should preserve original lines for unmodified cells', () => {
+      const originalLines = [
+        '# COMMAND ----------',
+        '',
+        '# DBTITLE 0,My Title',
+        'print("original")',
+      ];
+
+      const cells = [
+        {
+          type: 'code' as const,
+          content: 'print("original")',
+          title: 'My Title',
+          language: 'python',
+          originalLines: originalLines,
+        },
+      ];
+
+      const result = serializeNotebook(cells);
+      // Should contain the exact original lines
+      assert.ok(result.includes('# DBTITLE 0,My Title'));
+      assert.ok(result.includes('print("original")'));
+    });
+
+    it('should handle empty cells array', () => {
+      const result = serializeNotebook([]);
+      assert.strictEqual(result, '# Databricks notebook source');
+    });
+  });
+
+  describe('Complex Notebooks', () => {
+    it('should parse notebook with all cell types', () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %md
+# MAGIC # Documentation
+
+# COMMAND ----------
+
+print("python")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT 1
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val x = 1
+
+# COMMAND ----------
+
+# MAGIC %r
+# MAGIC x <- 1
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC ls -la
+
+# COMMAND ----------
+
+# MAGIC %fs
+# MAGIC ls /mnt
+
+# COMMAND ----------
+
+# MAGIC %run
+# MAGIC ./setup
+
+# COMMAND ----------
+
+# MAGIC %pip
+# MAGIC install pandas`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells.length, 9);
+
+      const types = notebook?.cells.map(c => c.type);
+      assert.deepStrictEqual(types, [
+        'markdown', 'code', 'sql', 'scala', 'r', 'shell', 'fs', 'run', 'pip'
+      ]);
+    });
+
+    it('should handle notebook with Windows line endings', () => {
+      const content = '# Databricks notebook source\r\n\r\nprint("hello")\r\n\r\n# COMMAND ----------\r\n\r\nprint("world")';
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells.length, 2);
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should return null for null input', () => {
+      // @ts-expect-error Testing invalid input
+      const notebook = parseNotebook(null);
+      assert.strictEqual(notebook, null);
+    });
+
+    it('should return null for undefined input', () => {
+      // @ts-expect-error Testing invalid input
+      const notebook = parseNotebook(undefined);
+      assert.strictEqual(notebook, null);
+    });
+
+    it('should handle malformed DBTITLE', () => {
+      const content = `# Databricks notebook source
+
+# DBTITLE invalid format
+print("hello")`;
+
+      const notebook = parseNotebook(content);
+      // Should still parse but without title
+      assert.ok(notebook);
+      assert.strictEqual(notebook?.cells[0].title, undefined);
+    });
+  });
 });

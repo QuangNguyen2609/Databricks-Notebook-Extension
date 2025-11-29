@@ -52,6 +52,9 @@ const SORTED_MAGIC_COMMANDS = Object.keys(MAGIC_COMMANDS).sort(
  * @returns true if the file starts with the Databricks notebook header
  */
 export function isDatabricksNotebook(content: string): boolean {
+  if (!content || typeof content !== 'string') {
+    return false;
+  }
   const firstLine = content.split('\n')[0]?.trim();
   return firstLine === NOTEBOOK_HEADER;
 }
@@ -321,7 +324,7 @@ export function serializeNotebook(cells: DatabricksCell[]): string {
  * @param originalCommand - The original magic command (if known)
  * @returns The magic command string
  */
-function getMagicCommandForType(type: CellType, originalCommand?: string): string {
+export function getMagicCommandForType(type: CellType, originalCommand?: string): string {
   // If we have the original command, use it
   if (originalCommand) {
     return originalCommand;
