@@ -83,6 +83,12 @@ export class KernelManager implements vscode.Disposable {
    * Refresh controllers based on current Python environments
    */
   private async refreshControllers(): Promise<void> {
+    // Trigger a refresh first (important on Windows for conda/venv discovery)
+    await this.pythonApi.refreshEnvironments();
+
+    // Small delay to allow Python extension to update its environment list
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
     const environments = await this.pythonApi.getAllEnvironments();
     // Active environment path could be used for setting preferred controller
     const activeEnvPath = await this.pythonApi.getActiveEnvironmentPath();
