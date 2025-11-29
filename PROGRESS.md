@@ -266,7 +266,13 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.0.4 (Current)
+### v0.0.5 (Current)
+- **SQL Auto-Detection**: Python cells starting with SQL keywords automatically convert to SQL cells
+- **SQL Cell Serialization Fix**: New SQL cells now correctly format with `# MAGIC %sql` on its own line
+- **Language Inference**: New cells with SQL, Scala, R, or Shell language IDs correctly serialize
+- **Edit Mode Preservation**: Cursor stays in cell after SQL auto-detection
+
+### v0.0.4
 - **Scrollable Output Fix**: Large outputs now properly scrollable
   - Sets `notebook.output.scrolling: true` by default via `configurationDefaults`
   - Works around VS Code bug where "View as scrollable element" link was non-functional
