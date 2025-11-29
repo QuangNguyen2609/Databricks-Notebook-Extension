@@ -101,10 +101,10 @@ export class PersistentExecutor implements vscode.Disposable {
 
     this._onDidChangeState.fire('starting');
 
-    console.log(`[Executor] Starting Python process:`);
-    console.log(`[Executor]   Python: ${this.pythonPath}`);
-    console.log(`[Executor]   Script: ${this.kernelScriptPath}`);
-    console.log(`[Executor]   CWD: ${this.workingDirectory}`);
+    console.debug(`[Executor] Starting Python process:`);
+    console.debug(`[Executor]   Python: ${this.pythonPath}`);
+    console.debug(`[Executor]   Script: ${this.kernelScriptPath}`);
+    console.debug(`[Executor]   CWD: ${this.workingDirectory}`);
 
     return new Promise((resolve) => {
       try {
@@ -141,7 +141,7 @@ export class PersistentExecutor implements vscode.Disposable {
 
         // Handle process exit
         this.process.on('exit', (code, signal) => {
-          console.log(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
+          console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
           this._onDidChangeState.fire('stopped');
           this.cleanup();
         });
@@ -184,12 +184,12 @@ export class PersistentExecutor implements vscode.Disposable {
         this._onDidChangeState.fire('ready');
         // Log Python info
         if ((response as { python_info?: string }).python_info) {
-          console.log(`[Executor] ${(response as { python_info?: string }).python_info}`);
+          console.debug(`[Executor] ${(response as { python_info?: string }).python_info}`);
         }
         // Store and log spark status
         if (response.spark_status) {
           lastSparkStatus = response.spark_status;
-          console.log(`[Executor] ${response.spark_status}`);
+          console.debug(`[Executor] ${response.spark_status}`);
           // Show notification for spark status
           if (response.spark_status.startsWith('OK:')) {
             vscode.window.showInformationMessage(`Kernel: ${response.spark_status}`);

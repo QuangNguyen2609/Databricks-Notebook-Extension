@@ -266,7 +266,12 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.0.5 (Current)
+### v0.0.6 (Current)
+- **Unified Tab Experience for Notebook Button**: Clicking the notebook icon in editor title bar now replaces the text editor tab instead of opening a new tab
+- Applied the same "close-then-open" pattern used in auto-open and notification flows
+- Enhance the python kernel discovery
+
+### v0.0.5
 - **SQL Auto-Detection**: Python cells starting with SQL keywords automatically convert to SQL cells
 - **SQL Cell Serialization Fix**: New SQL cells now correctly format with `# MAGIC %sql` on its own line
 - **Language Inference**: New cells with SQL, Scala, R, or Shell language IDs correctly serialize
