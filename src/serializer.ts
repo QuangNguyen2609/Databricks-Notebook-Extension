@@ -87,6 +87,39 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
   }
 
   /**
+   * Infer cell type from VS Code language ID
+   * @param languageId - The VS Code language identifier
+   * @param content - The cell content (used for SQL auto-detection)
+   * @returns The inferred cell type
+   */
+  private inferCellTypeFromLanguage(languageId: string, content: string): CellType {
+    // Map VS Code language IDs to Databricks cell types
+    const languageToType: Record<string, CellType> = {
+      'sql': 'sql',
+      'scala': 'scala',
+      'r': 'r',
+      'shellscript': 'shell',
+      'bash': 'shell',
+      'sh': 'shell',
+    };
+
+    // Check if language matches a known type
+    if (languageToType[languageId]) {
+      return languageToType[languageId];
+    }
+
+    // Auto-detect SQL from content (SELECT, INSERT, UPDATE, DELETE, etc.)
+    const trimmedContent = content.trim();
+    const sqlKeywords = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|MERGE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE)\b/i;
+    if (languageId === 'python' && sqlKeywords.test(trimmedContent)) {
+      return 'sql';
+    }
+
+    // Default to code (Python)
+    return 'code';
+  }
+
+  /**
    * Convert VS Code NotebookCellData back to DatabricksCell
    * @param cell - The VS Code cell to convert
    * @returns Databricks cell format
@@ -94,14 +127,15 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
   private convertFromNotebookCell(cell: vscode.NotebookCellData): DatabricksCell {
     const metadata = (cell.metadata as Record<string, unknown>) || {};
 
-    // Determine cell type from metadata or infer from kind
+    // Determine cell type from metadata or infer from kind/language
     let type: CellType;
     if (typeof metadata.databricksType === 'string') {
       type = metadata.databricksType as CellType;
     } else if (cell.kind === vscode.NotebookCellKind.Markup) {
       type = 'markdown';
     } else {
-      type = 'code';
+      // Infer type from language ID for newly created cells
+      type = this.inferCellTypeFromLanguage(cell.languageId, cell.value);
     }
 
     // Get original lines and content from metadata
