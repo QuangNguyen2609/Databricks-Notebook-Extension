@@ -93,6 +93,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await handleDocumentOpen(document);
     })
   );
+
+  // Auto-detect SQL cells based on content (SELECT, INSERT, etc.)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeNotebookDocument((event) => {
+      handleNotebookCellChanges(event);
+    })
+  );
 }
 
 /**
@@ -345,6 +352,93 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   }
 }
 
+// SQL keywords that trigger auto-detection
+const SQL_KEYWORDS_REGEX = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|MERGE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE)\b/i;
+
+// Track cells that have been auto-detected to avoid repeated changes
+const autoDetectedCells = new Set<string>();
+
+/**
+ * Handle notebook cell content changes for auto-detection
+ * @param event - The notebook document change event
+ */
+function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEvent): void {
+  // Only process our notebook type
+  if (event.notebook.notebookType !== 'databricks-notebook') {
+    return;
+  }
+
+  // Process cell content changes
+  for (const change of event.cellChanges) {
+    const cell = change.cell;
+
+    // Only auto-detect for code cells that are currently Python
+    if (cell.kind !== vscode.NotebookCellKind.Code) {
+      continue;
+    }
+
+    // Skip if already auto-detected
+    const cellKey = `${event.notebook.uri.toString()}:${cell.index}`;
+    if (autoDetectedCells.has(cellKey)) {
+      continue;
+    }
+
+    // Check if cell language is Python (or hasn't been explicitly set)
+    const languageId = cell.document.languageId;
+    if (languageId !== 'python') {
+      continue;
+    }
+
+    // Get the cell content
+    const content = cell.document.getText().trim();
+
+    // Check if content starts with SQL keywords
+    if (SQL_KEYWORDS_REGEX.test(content)) {
+      // Mark as auto-detected to avoid repeated changes
+      autoDetectedCells.add(cellKey);
+
+      const cellIndex = cell.index;
+
+      // Create a workspace edit to update both content and metadata
+      const edit = new vscode.WorkspaceEdit();
+
+      // Update cell metadata
+      const metadataEdit = vscode.NotebookEdit.updateCellMetadata(
+        cellIndex,
+        {
+          ...cell.metadata,
+          databricksType: 'sql',
+        }
+      );
+
+      // Prepend %sql to the content
+      const newContent = `%sql\n${content}`;
+      const contentEdit = vscode.NotebookEdit.replaceCells(
+        new vscode.NotebookRange(cellIndex, cellIndex + 1),
+        [new vscode.NotebookCellData(
+          vscode.NotebookCellKind.Code,
+          newContent,
+          'sql'
+        )]
+      );
+      edit.set(event.notebook.uri, [metadataEdit, contentEdit]);
+
+      // Apply all edits and restore focus
+      vscode.workspace.applyEdit(edit).then((success) => {
+        if (success) {
+          // Restore focus to the cell and enter edit mode
+          const notebookEditor = vscode.window.activeNotebookEditor;
+          if (notebookEditor && notebookEditor.notebook.uri.toString() === event.notebook.uri.toString()) {
+            // Select the cell and enter edit mode
+            notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
+            vscode.commands.executeCommand('notebook.cell.edit');
+          }
+        }
+      });
+    }
+  }
+}
+
 /**
  * Extension deactivation
  * Called when VS Code deactivates the extension
@@ -353,6 +447,7 @@ export function deactivate(): void {
   console.log('Databricks Notebook Viewer is now deactivated');
   processingDocuments.clear();
   viewingAsRawText.clear();
+  autoDetectedCells.clear();
 
   // Kernel manager is disposed via context.subscriptions, but clear reference
   kernelManager = undefined;

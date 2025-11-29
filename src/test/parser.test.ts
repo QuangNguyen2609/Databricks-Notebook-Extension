@@ -335,6 +335,58 @@ print("Python code")
       const result = serializeNotebook(cells);
       assert.ok(result.includes('# DBTITLE 0,My Title'));
     });
+
+    it('should serialize SQL cell with %sql prefix when content does not include it', () => {
+      const cells = [
+        {
+          type: 'sql' as const,
+          content: 'SELECT * FROM table',
+          language: 'sql',
+          originalLines: [],
+        },
+      ];
+
+      const result = serializeNotebook(cells);
+      assert.ok(result.includes('# MAGIC %sql'));
+      assert.ok(result.includes('# MAGIC SELECT * FROM table'));
+      // Verify %sql appears on its own line before the SQL content
+      const lines = result.split('\n');
+      const sqlMagicIndex = lines.findIndex(l => l === '# MAGIC %sql');
+      const selectIndex = lines.findIndex(l => l === '# MAGIC SELECT * FROM table');
+      assert.ok(sqlMagicIndex >= 0, 'Should have # MAGIC %sql line');
+      assert.ok(selectIndex > sqlMagicIndex, 'SELECT should appear after %sql');
+    });
+
+    it('should not duplicate %sql when content already includes it', () => {
+      const cells = [
+        {
+          type: 'sql' as const,
+          content: '%sql\nSELECT * FROM table',
+          language: 'sql',
+          originalLines: [],
+        },
+      ];
+
+      const result = serializeNotebook(cells);
+      // Count occurrences of %sql
+      const sqlCount = (result.match(/# MAGIC %sql/g) || []).length;
+      assert.strictEqual(sqlCount, 1, 'Should have exactly one # MAGIC %sql');
+    });
+
+    it('should serialize shell cell with %sh prefix when content does not include it', () => {
+      const cells = [
+        {
+          type: 'shell' as const,
+          content: 'ls -la',
+          language: 'shellscript',
+          originalLines: [],
+        },
+      ];
+
+      const result = serializeNotebook(cells);
+      assert.ok(result.includes('# MAGIC %sh'));
+      assert.ok(result.includes('# MAGIC ls -la'));
+    });
   });
 
   describe('Round-trip Parsing', () => {

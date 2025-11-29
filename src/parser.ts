@@ -304,14 +304,30 @@ export function serializeNotebook(cells: DatabricksCell[]): string {
       });
     } else {
       // Other magic types (sql, scala, shell, etc.)
-      // Content already includes the magic command, just add MAGIC prefix
+      const magicCommand = getMagicCommandForType(cell.type);
       const contentLines = cell.content.split('\n');
+
+      // Remove trailing empty lines
       while (contentLines.length > 0 && contentLines[contentLines.length - 1].trim() === '') {
         contentLines.pop();
       }
-      contentLines.forEach((line) => {
-        lines.push(`${MAGIC_PREFIX}${line}`);
-      });
+
+      // Check if content already starts with the magic command
+      const firstLine = contentLines[0]?.trim() || '';
+      const contentStartsWithMagic = firstLine.startsWith('%');
+
+      if (contentStartsWithMagic) {
+        // Content already includes magic command, just add MAGIC prefix to each line
+        contentLines.forEach((line) => {
+          lines.push(`${MAGIC_PREFIX}${line}`);
+        });
+      } else {
+        // Content doesn't include magic command - add it as first line
+        lines.push(`${MAGIC_PREFIX}${magicCommand}`);
+        contentLines.forEach((line) => {
+          lines.push(`${MAGIC_PREFIX}${line}`);
+        });
+      }
     }
   });
 
