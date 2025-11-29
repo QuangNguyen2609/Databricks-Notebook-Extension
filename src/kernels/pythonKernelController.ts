@@ -9,6 +9,11 @@ import * as vscode from 'vscode';
 import { PythonEnvironment } from '../utils/pythonExtensionApi';
 import { PersistentExecutor } from './persistentExecutor';
 import { OutputHandler } from '../utils/outputHandler';
+import {
+  wrapSqlCode as wrapSqlCodeUtil,
+  wrapShellCode as wrapShellCodeUtil,
+  stripMagicPrefix as stripMagicPrefixUtil,
+} from '../utils/codeTransform';
 
 /**
  * NotebookController for a specific Python interpreter
@@ -197,52 +202,21 @@ export class PythonKernelController implements vscode.Disposable {
    * Wrap SQL code in spark.sql() for execution
    */
   private wrapSqlCode(sql: string): string {
-    // Strip %sql prefix if present (it's visible in the cell now)
-    const cleanSql = this.stripMagicPrefix(sql, '%sql');
-
-    // Escape triple quotes in SQL if present
-    const escapedSql = cleanSql.replace(/"""/g, '\\"\\"\\"');
-    return `
-if 'spark' not in dir():
-    raise NameError("""'spark' is not defined. Initialize it first by running:
-
-# For Databricks Connect:
-from databricks.connect import DatabricksSession
-spark = DatabricksSession.builder.getOrCreate()
-
-# Or configure your cluster connection:
-spark = DatabricksSession.builder.remote("sc://YOUR_WORKSPACE:443/;token=YOUR_TOKEN;x-databricks-cluster-id=YOUR_CLUSTER_ID").getOrCreate()
-""")
-_df = spark.sql("""${escapedSql}""")
-_df.show()`.trim();
+    return wrapSqlCodeUtil(sql);
   }
 
   /**
    * Wrap shell code in subprocess for execution
    */
   private wrapShellCode(shellCode: string): string {
-    // Strip %sh prefix if present
-    const cleanCode = this.stripMagicPrefix(shellCode, '%sh');
-
-    // Escape the shell code for Python string
-    const escapedCode = cleanCode.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return `import subprocess as _sp
-_result = _sp.run("""${escapedCode}""", shell=True, capture_output=True, text=True)
-if _result.stdout:
-    print(_result.stdout)
-if _result.stderr:
-    print(_result.stderr)`;
+    return wrapShellCodeUtil(shellCode);
   }
 
   /**
    * Strip magic command prefix from code
    */
   private stripMagicPrefix(code: string, prefix: string): string {
-    let result = code.trim();
-    if (result.startsWith(prefix)) {
-      result = result.substring(prefix.length).trim();
-    }
-    return result;
+    return stripMagicPrefixUtil(code, prefix);
   }
 
   /**
