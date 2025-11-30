@@ -5,6 +5,21 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2025-11-30
+
+### Added
+- **SQL Intellisense for Databricks Catalog**: Auto-complete suggestions for schemas, tables, and columns from Databricks Unity Catalog
+  - Suggests schemas when typing `SELECT * FROM ` (uses default catalog)
+  - Suggests tables when typing `SELECT * FROM schema.`
+  - Suggests columns when typing `table.` in SELECT/WHERE clauses
+  - Supports both 2-level (`schema.table`) and 3-level (`catalog.schema.table`) naming
+  - Handles ambiguous references (e.g., `name.` could be catalog or schema)
+  - Triggered on `.` character for seamless completion flow
+- **Default Catalog Detection**: Automatically detects default catalog via `spark.catalog.currentCatalog()`
+- **Lazy Loading**: Metadata fetched only on first use, cached until kernel restart (no repeated queries)
+- **Manual Refresh Command**: `databricks-notebook.refreshCatalogCache` to clear catalog cache
+- **27 new unit tests** for SQL context parser
+
 ## [0.0.6] - 2025-11-30
 
 ### Added

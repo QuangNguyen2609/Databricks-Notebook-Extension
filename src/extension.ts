@@ -9,9 +9,13 @@
 import * as vscode from 'vscode';
 import { DatabricksNotebookSerializer, checkIsDatabricksNotebook } from './serializer';
 import { KernelManager } from './kernels';
+import { CatalogService, SqlCompletionProvider, SqlContextParser } from './intellisense';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
+
+// Global catalog service for SQL intellisense
+let catalogService: CatalogService | undefined;
 
 // Track documents currently being processed to avoid race conditions
 const processingDocuments = new Set<string>();
@@ -52,8 +56,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     console.error('Failed to initialize kernel manager:', error);
   });
 
-  // Register kernel-related commands
-  kernelManager.registerCommands(context);
+  // Initialize SQL intellisense for catalog/schema/table completion
+  catalogService = new CatalogService(() => kernelManager?.getActiveExecutor() ?? null);
+
+  // Register kernel-related commands (with callback to clear catalog cache on restart)
+  kernelManager.registerCommands(context, () => {
+    catalogService?.clearCache();
+  });
+  const sqlParser = new SqlContextParser();
+  const sqlCompletionProvider = new SqlCompletionProvider(catalogService, sqlParser);
+
+  // Register completion provider for SQL in notebook cells
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'sql', scheme: 'vscode-notebook-cell' },
+      sqlCompletionProvider,
+      '.' // Trigger on dot for schema.table completion
+    )
+  );
+
+  // Command to refresh catalog cache manually
+  context.subscriptions.push(
+    vscode.commands.registerCommand('databricks-notebook.refreshCatalogCache', () => {
+      catalogService?.clearCache();
+      vscode.window.showInformationMessage('Catalog cache cleared. Will refresh on next completion.');
+    })
+  );
 
   // Register command to open .py file as Databricks notebook
   context.subscriptions.push(
@@ -642,6 +670,10 @@ export function deactivate(): void {
   processingDocuments.clear();
   viewingAsRawText.clear();
   autoDetectedCells.clear();
+
+  // Clear catalog cache
+  catalogService?.clearCache();
+  catalogService = undefined;
 
   // Kernel manager is disposed via context.subscriptions, but clear reference
   kernelManager = undefined;
