@@ -5,6 +5,18 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2025-11-30
+
+### Added
+- **Unified Tab Experience for Notebook Button**: Clicking the notebook icon in editor title bar now replaces the text editor tab instead of opening a new tab
+  - Applied the same "close-then-open" pattern used in auto-open and notification flows
+  - Prevents duplicate tabs when opening notebooks from the editor title bar
+
+### Improved
+- **Python Kernel Discovery**: Enhanced Python environment discovery and refresh mechanism
+  - Better detection of available Python interpreters
+  - Improved kernel controller management
+
 ## [0.0.5] - 2025-11-29
 
 ### Added
