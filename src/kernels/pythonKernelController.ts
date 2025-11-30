@@ -56,11 +56,13 @@ export class PythonKernelController implements vscode.Disposable {
 
     this.outputHandler = new OutputHandler();
 
-    // Track when this controller is selected
+    // Track when this controller is selected and initialize executor
     this.disposables.push(
       this.controller.onDidChangeSelectedNotebooks((event) => {
         if (event.selected) {
           console.debug(`[Kernel] Controller selected for: ${event.notebook.uri.toString()}`);
+          // Initialize executor on kernel selection so intellisense works before first cell execution
+          this.ensureExecutor(event.notebook);
         }
       })
     );
@@ -333,6 +335,27 @@ export class PythonKernelController implements vscode.Disposable {
    */
   isRunning(): boolean {
     return this.executor?.isRunning() ?? false;
+  }
+
+  /**
+   * Ensure executor is initialized (used for intellisense before first cell execution)
+   */
+  ensureExecutor(notebook: vscode.NotebookDocument): void {
+    if (!this.executor) {
+      console.debug(`[Kernel] Creating executor for intellisense: ${this.environment.path}`);
+      this.executor = new PersistentExecutor(
+        this.environment.path,
+        this.extensionPath,
+        this.getWorkingDirectory(notebook)
+      );
+    }
+  }
+
+  /**
+   * Get the executor instance (for intellisense providers)
+   */
+  getExecutor(): PersistentExecutor | null {
+    return this.executor;
   }
 
   /**

@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { PythonExtensionApi, PythonEnvironment } from '../utils/pythonExtensionApi';
 import { PythonKernelController } from './pythonKernelController';
+import { PersistentExecutor } from './persistentExecutor';
 
 /**
  * Manages all Python kernel controllers for the Databricks notebook type
@@ -191,9 +192,24 @@ export class KernelManager implements vscode.Disposable {
   }
 
   /**
-   * Register kernel-related commands
+   * Get the executor from the first running kernel.
+   * Used for intellisense providers that need to query Databricks.
    */
-  registerCommands(context: vscode.ExtensionContext): void {
+  getActiveExecutor(): PersistentExecutor | null {
+    for (const controller of this.controllers.values()) {
+      if (controller.isRunning()) {
+        return controller.getExecutor();
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Register kernel-related commands
+   * @param context - Extension context
+   * @param onKernelRestart - Optional callback called when kernel is restarted (e.g., to clear caches)
+   */
+  registerCommands(context: vscode.ExtensionContext, onKernelRestart?: () => void): void {
     // Command to restart kernel
     context.subscriptions.push(
       vscode.commands.registerCommand('databricks-notebook.restartKernel', async () => {
@@ -210,6 +226,8 @@ export class KernelManager implements vscode.Disposable {
           if (controller.isRunning()) {
             const restarted = await controller.restart();
             if (restarted) {
+              // Call the restart callback (e.g., to clear catalog cache)
+              onKernelRestart?.();
               vscode.window.showInformationMessage('Kernel restarted successfully');
             }
             return;
