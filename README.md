@@ -27,18 +27,21 @@ A VS Code extension that renders Databricks `.py` notebook files as proper noteb
 
 ## Installation
 
-### From VSIX (Local Installation)
+### Download from GitHub Releases (Recommended)
 
-1. Build the extension:
+1. Go to [Latest Release](https://github.com/QuangNguyen2609/Databricks-Notebook-Extension/releases/latest)
+2. Download the `.vsix` file
+3. In VS Code: `Ctrl+Shift+P` → "Extensions: Install from VSIX..."
+4. Select the downloaded `.vsix` file
+
+### Build from Source
+
+1. Clone the repository and build:
    ```bash
    bash build.sh
    ```
 
-2. Install the VSIX:
-   - Open VS Code
-   - Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
-   - Type "Extensions: Install from VSIX"
-   - Select the generated `.vsix` file
+2. Install the generated `.vsix` file (see above)
 
 ### From Marketplace (Coming Soon)
 
