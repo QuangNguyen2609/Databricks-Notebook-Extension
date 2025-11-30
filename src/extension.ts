@@ -100,6 +100,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       handleNotebookCellChanges(event);
     })
   );
+
+  // Clean up autoDetectedCells when notebook is closed to prevent memory leaks
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseNotebookDocument((notebook) => {
+      if (notebook.notebookType !== 'databricks-notebook') {
+        return;
+      }
+      // Clean up entries for this notebook by matching the notebook path in cell URIs
+      const notebookPath = notebook.uri.fsPath;
+      for (const key of autoDetectedCells) {
+        if (key.includes(notebookPath)) {
+          autoDetectedCells.delete(key);
+        }
+      }
+    })
+  );
 }
 
 /**
@@ -373,7 +389,219 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
 const SQL_KEYWORDS_REGEX = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|MERGE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE)\b/i;
 
 // Track cells that have been auto-detected to avoid repeated changes
+// Uses cell document URI which is stable across index changes
 const autoDetectedCells = new Set<string>();
+
+// Map language IDs to their required magic commands
+const LANGUAGE_TO_MAGIC: Record<string, string> = {
+  'sql': '%sql',
+  'scala': '%scala',
+  'r': '%r',
+  'shellscript': '%sh',
+};
+
+// Map magic commands to Databricks cell types
+const MAGIC_TO_TYPE: Record<string, string> = {
+  '%sql': 'sql',
+  '%scala': 'scala',
+  '%r': 'r',
+  '%sh': 'shell',
+};
+
+/**
+ * Ensure a cell has the required magic command in its content
+ * @param notebook - The notebook document
+ * @param cell - The cell to update
+ * @param magicCommand - The magic command to ensure (e.g., '%sql')
+ * @param languageId - The target language ID
+ */
+async function ensureMagicCommand(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  magicCommand: string,
+  languageId: string
+): Promise<void> {
+  const content = cell.document.getText();
+  const cellKey = cell.document.uri.toString();
+  const cellIndex = cell.index;
+
+  // Mark as processed to prevent infinite loops
+  autoDetectedCells.add(cellKey);
+
+  // Build new content with magic command
+  const newContent = content.trim()
+    ? `${magicCommand}\n${content}`
+    : magicCommand;
+
+  const edit = new vscode.WorkspaceEdit();
+
+  const cellData = new vscode.NotebookCellData(
+    vscode.NotebookCellKind.Code,
+    newContent,
+    languageId
+  );
+
+  cellData.metadata = {
+    ...cell.metadata,
+    databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
+  };
+
+  edit.set(notebook.uri, [
+    vscode.NotebookEdit.replaceCells(
+      new vscode.NotebookRange(cellIndex, cellIndex + 1),
+      [cellData]
+    )
+  ]);
+
+  const success = await vscode.workspace.applyEdit(edit);
+
+  if (success) {
+    // Restore cursor to the cell and enter edit mode
+    const notebookEditor = vscode.window.activeNotebookEditor;
+    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
+      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
+      vscode.commands.executeCommand('notebook.cell.edit');
+    }
+  }
+}
+
+/**
+ * Handle newly added cells to ensure magic commands are present
+ * @param notebook - The notebook document
+ * @param cell - The newly added cell
+ */
+function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.NotebookCell): void {
+  // Only process code cells
+  if (cell.kind !== vscode.NotebookCellKind.Code) {
+    return;
+  }
+
+  const languageId = cell.document.languageId;
+  const content = cell.document.getText().trim();
+  const cellKey = cell.document.uri.toString();
+
+  // Skip if already processed
+  if (autoDetectedCells.has(cellKey)) {
+    return;
+  }
+
+  const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
+
+  // If language requires magic command and content doesn't have it
+  if (requiredMagic && !content.startsWith(requiredMagic)) {
+    ensureMagicCommand(notebook, cell, requiredMagic, languageId);
+  }
+}
+
+/**
+ * Remove magic command from cell content when language is changed away from magic-command language
+ * @param notebook - The notebook document
+ * @param cell - The cell to update
+ * @param magicCommand - The magic command to remove (e.g., '%sql')
+ * @param languageId - The target language ID
+ */
+async function removeMagicCommand(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  magicCommand: string,
+  languageId: string
+): Promise<void> {
+  const content = cell.document.getText();
+  const cellKey = cell.document.uri.toString();
+  const cellIndex = cell.index;
+
+  // Mark as processed to prevent infinite loops
+  autoDetectedCells.add(cellKey);
+
+  // Remove the magic command from content
+  // Handle both "%sql\n..." and "%sql" (just the command)
+  let newContent = content;
+  if (content.trim() === magicCommand) {
+    newContent = '';
+  } else if (content.startsWith(magicCommand + '\n')) {
+    newContent = content.substring(magicCommand.length + 1);
+  } else if (content.startsWith(magicCommand)) {
+    // Handle case where there's content directly after magic (e.g., "%sqlSELECT")
+    newContent = content.substring(magicCommand.length).trimStart();
+  }
+
+  const edit = new vscode.WorkspaceEdit();
+
+  const cellData = new vscode.NotebookCellData(
+    vscode.NotebookCellKind.Code,
+    newContent,
+    languageId
+  );
+
+  cellData.metadata = {
+    ...cell.metadata,
+    databricksType: 'code', // Reset to Python/code type
+  };
+
+  edit.set(notebook.uri, [
+    vscode.NotebookEdit.replaceCells(
+      new vscode.NotebookRange(cellIndex, cellIndex + 1),
+      [cellData]
+    )
+  ]);
+
+  const success = await vscode.workspace.applyEdit(edit);
+
+  if (success) {
+    // Restore cursor to the cell and enter edit mode
+    const notebookEditor = vscode.window.activeNotebookEditor;
+    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
+      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
+      vscode.commands.executeCommand('notebook.cell.edit');
+    }
+  }
+}
+
+/**
+ * Handle cell content or language changes
+ * @param notebook - The notebook document
+ * @param change - The cell change event
+ */
+function handleCellContentChange(
+  notebook: vscode.NotebookDocument,
+  change: { cell: vscode.NotebookCell; document?: vscode.TextDocument; metadata?: unknown; outputs?: unknown }
+): void {
+  const cell = change.cell;
+
+  // Only process code cells
+  if (cell.kind !== vscode.NotebookCellKind.Code) {
+    return;
+  }
+
+  const cellKey = cell.document.uri.toString();
+  const languageId = cell.document.languageId;
+  const content = cell.document.getText().trim();
+
+  const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
+
+  // Handle language change TO magic-command language (e.g., user changed language picker to SQL)
+  if (requiredMagic && !content.startsWith(requiredMagic) && !autoDetectedCells.has(cellKey)) {
+    ensureMagicCommand(notebook, cell, requiredMagic, languageId);
+    return;
+  }
+
+  // Handle language change FROM magic-command language to Python
+  // If language is now Python but content still has a magic command, remove it
+  if (languageId === 'python' && !autoDetectedCells.has(cellKey)) {
+    // Check if content starts with any magic command that should be removed
+    for (const [, magic] of Object.entries(LANGUAGE_TO_MAGIC)) {
+      if (content.startsWith(magic)) {
+        removeMagicCommand(notebook, cell, magic, languageId);
+        return;
+      }
+    }
+
+    // Auto-detect SQL in Python cells (existing functionality)
+    if (SQL_KEYWORDS_REGEX.test(content)) {
+      ensureMagicCommand(notebook, cell, '%sql', 'sql');
+    }
+  }
+}
 
 /**
  * Handle notebook cell content changes for auto-detection
@@ -385,74 +613,23 @@ function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEvent): v
     return;
   }
 
-  // Process cell content changes
+  // 1. Handle removed cells - cleanup tracking state
+  for (const contentChange of event.contentChanges) {
+    for (const removedCell of contentChange.removedCells) {
+      autoDetectedCells.delete(removedCell.document.uri.toString());
+    }
+  }
+
+  // 2. Handle newly added cells (for magic command injection)
+  for (const contentChange of event.contentChanges) {
+    for (const addedCell of contentChange.addedCells) {
+      handleNewCell(event.notebook, addedCell);
+    }
+  }
+
+  // 3. Process cell content/language changes
   for (const change of event.cellChanges) {
-    const cell = change.cell;
-
-    // Only auto-detect for code cells that are currently Python
-    if (cell.kind !== vscode.NotebookCellKind.Code) {
-      continue;
-    }
-
-    // Skip if already auto-detected
-    const cellKey = `${event.notebook.uri.toString()}:${cell.index}`;
-    if (autoDetectedCells.has(cellKey)) {
-      continue;
-    }
-
-    // Check if cell language is Python (or hasn't been explicitly set)
-    const languageId = cell.document.languageId;
-    if (languageId !== 'python') {
-      continue;
-    }
-
-    // Get the cell content
-    const content = cell.document.getText().trim();
-
-    // Check if content starts with SQL keywords
-    if (SQL_KEYWORDS_REGEX.test(content)) {
-      // Mark as auto-detected to avoid repeated changes
-      autoDetectedCells.add(cellKey);
-
-      const cellIndex = cell.index;
-
-      // Create a workspace edit to update both content and metadata
-      const edit = new vscode.WorkspaceEdit();
-
-      // Update cell metadata
-      const metadataEdit = vscode.NotebookEdit.updateCellMetadata(
-        cellIndex,
-        {
-          ...cell.metadata,
-          databricksType: 'sql',
-        }
-      );
-
-      // Prepend %sql to the content
-      const newContent = `%sql\n${content}`;
-      const contentEdit = vscode.NotebookEdit.replaceCells(
-        new vscode.NotebookRange(cellIndex, cellIndex + 1),
-        [new vscode.NotebookCellData(
-          vscode.NotebookCellKind.Code,
-          newContent,
-          'sql'
-        )]
-      );
-      edit.set(event.notebook.uri, [metadataEdit, contentEdit]);
-
-      // Apply all edits and restore focus
-      vscode.workspace.applyEdit(edit).then((success) => {
-        if (success) {
-          // Restore focus to the cell and enter edit mode
-          const notebookEditor = vscode.window.activeNotebookEditor;
-          if (notebookEditor && notebookEditor.notebook.uri.toString() === event.notebook.uri.toString()) {
-            // Select the cell and enter edit mode
-            notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-            vscode.commands.executeCommand('notebook.cell.edit');
-          }
-        }
-      });
-    }
+    handleCellContentChange(event.notebook, change);
   }
 }
 
