@@ -132,6 +132,21 @@ print("cell 3")`;
       assert.ok(notebook?.cells[0].content.includes('SELECT * FROM table'));
     });
 
+    it('should parse SQL cell with blank line before MAGIC command', () => {
+      const content = `# Databricks notebook source
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select COUNT(*), COUNT(distinct preference_id) from santas_reporting.preference`;
+
+      const notebook = parseNotebook(content);
+      assert.strictEqual(notebook?.cells.length, 1);
+      assert.strictEqual(notebook?.cells[0].type, 'sql');
+      assert.strictEqual(notebook?.cells[0].language, 'sql');
+      assert.ok(notebook?.cells[0].content.includes('select COUNT(*)'));
+    });
+
     it('should handle complex SQL queries', () => {
       const content = `# Databricks notebook source
 

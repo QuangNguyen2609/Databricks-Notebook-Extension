@@ -428,6 +428,25 @@ const LANGUAGE_TO_MAGIC: Record<string, string> = {
   'shellscript': '%sh',
 };
 
+// Sorted magic commands by length (longest first) to prevent %r matching %run
+const SORTED_MAGIC_COMMANDS = Object.values(LANGUAGE_TO_MAGIC).sort(
+  (a, b) => b.length - a.length
+);
+
+/**
+ * Check if content starts with a specific magic command
+ * Ensures exact match (followed by whitespace, newline, or end of string)
+ * to prevent %r matching %run
+ */
+function contentStartsWithMagic(content: string, magic: string): boolean {
+  if (!content.startsWith(magic)) {
+    return false;
+  }
+  // Check that the magic command is complete (not a prefix of another command)
+  const afterMagic = content.substring(magic.length);
+  return afterMagic.length === 0 || /^[\s\n]/.test(afterMagic);
+}
+
 // Map magic commands to Databricks cell types
 const MAGIC_TO_TYPE: Record<string, string> = {
   '%sql': 'sql',
@@ -516,7 +535,7 @@ function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.NotebookC
   const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
 
   // If language requires magic command and content doesn't have it
-  if (requiredMagic && !content.startsWith(requiredMagic)) {
+  if (requiredMagic && !contentStartsWithMagic(content, requiredMagic)) {
     ensureMagicCommand(notebook, cell, requiredMagic, languageId);
   }
 }
@@ -608,7 +627,7 @@ function handleCellContentChange(
   const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
 
   // Handle language change TO magic-command language (e.g., user changed language picker to SQL)
-  if (requiredMagic && !content.startsWith(requiredMagic) && !autoDetectedCells.has(cellKey)) {
+  if (requiredMagic && !contentStartsWithMagic(content, requiredMagic) && !autoDetectedCells.has(cellKey)) {
     ensureMagicCommand(notebook, cell, requiredMagic, languageId);
     return;
   }
@@ -617,8 +636,9 @@ function handleCellContentChange(
   // If language is now Python but content still has a magic command, remove it
   if (languageId === 'python' && !autoDetectedCells.has(cellKey)) {
     // Check if content starts with any magic command that should be removed
-    for (const [, magic] of Object.entries(LANGUAGE_TO_MAGIC)) {
-      if (content.startsWith(magic)) {
+    // Use sorted list (longest first) to prevent %r matching %run
+    for (const magic of SORTED_MAGIC_COMMANDS) {
+      if (contentStartsWithMagic(content, magic)) {
         removeMagicCommand(notebook, cell, magic, languageId);
         return;
       }

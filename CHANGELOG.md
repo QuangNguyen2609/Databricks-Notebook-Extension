@@ -5,6 +5,22 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-12-01
+
+### Added
+- **GitHub Releases**: Automated VSIX uploads to GitHub Releases on version tags
+
+### Fixed
+- **%run command corruption**: Fixed bug where `%run` cells were corrupted to `un` when clearing outputs or changing cell language
+  - `%r` was incorrectly matching `%run` due to prefix match
+  - Now uses exact magic command matching (checks for whitespace/newline after command)
+  - Sorted magic commands by length (longest first) for safer matching
+
+### Improved
+- **Databricks Connect Initialization**: Simplified and streamlined SparkSession initialization with clearer error messages
+  - Better fallback flow: SPARK_REMOTE → profile + serverless → token cache
+  - More helpful error message suggesting `databricks auth login` when authentication fails
+
 ## [0.1.0] - 2025-11-30
 
 ### Added

@@ -5,6 +5,7 @@ node_modules/
 out/
 dist/
 *.vsix
+**/__pycache__/
 
 # TypeScript
 *.tsbuildinfo
@@ -27,6 +28,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+*.pyc
 
 # Environment files
 .env

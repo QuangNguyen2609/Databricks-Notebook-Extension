@@ -2,7 +2,7 @@
   "name": "databricks-notebook-viewer",
   "displayName": "Databricks Notebook Viewer",
   "description": "Visualize Databricks .py notebooks with proper cell rendering, syntax highlighting, and markdown support",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "databricks-notebook-viewer",
   "engines": {
     "vscode": "^1.80.0"

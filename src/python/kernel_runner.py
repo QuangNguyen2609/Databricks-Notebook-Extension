@@ -50,11 +50,10 @@ def _get_databricks_profile():
 
 def _get_token_from_cache(host: str) -> str | None:
     """
-    Try to get a token from the Databricks CLI token cache.
-    This is used when auth_type=databricks-cli is configured.
+    Get token from Databricks CLI token cache.
+    Used as fallback when profile auth fails (e.g., databricks-cli auth type).
     """
     import os
-    import json
 
     cache_path = os.path.expanduser('~/.databricks/token-cache.json')
     if not os.path.exists(cache_path):
@@ -65,21 +64,14 @@ def _get_token_from_cache(host: str) -> str | None:
             cache = json.load(f)
 
         tokens = cache.get('tokens', {})
-        # Normalize host (remove trailing slash)
         host = host.rstrip('/')
 
-        # Look for token matching our host
         for key, token_data in tokens.items():
             if host in key or key in host:
-                token = token_data.get('access_token')
-                if token:
-                    return token
+                return token_data.get('access_token')
 
-        # If no exact match, try the first token
         if tokens:
-            first_key = next(iter(tokens))
-            return tokens[first_key].get('access_token')
-
+            return list(tokens.values())[0].get('access_token')
     except Exception:
         pass
 
@@ -88,24 +80,15 @@ def _get_token_from_cache(host: str) -> str | None:
 
 def _initialize_spark_session():
     """
-    Try to initialize a Databricks Connect SparkSession.
-    This makes 'spark' available in the namespace like in Databricks notebooks.
+    Initialize Databricks Connect SparkSession with serverless compute.
     """
     import os
     import configparser
     errors = []
 
-    # Check for Databricks configuration
-    has_databricks_config = (
-        os.environ.get('DATABRICKS_HOST') or
-        os.environ.get('SPARK_REMOTE') or
-        os.path.exists(os.path.expanduser('~/.databrickscfg'))
-    )
-
-    # Get profile to use
     profile = _get_databricks_profile()
 
-    # Read host from config if available
+    # Read host from config
     host = os.environ.get('DATABRICKS_HOST')
     if not host and profile:
         config_path = os.path.expanduser('~/.databrickscfg')
@@ -115,57 +98,46 @@ def _initialize_spark_session():
             if config.has_option(profile, 'host'):
                 host = config.get(profile, 'host')
 
-    # Try Databricks Connect v2 (databricks-connect >= 13.0)
     try:
         from databricks.connect import DatabricksSession
 
-        # Try to get or create session
-        builder = DatabricksSession.builder
-
-        # If SPARK_REMOTE is set, use it (this is how Databricks extension configures it)
+        # Method 1: SPARK_REMOTE env var (Databricks extension sets this)
         spark_remote = os.environ.get('SPARK_REMOTE')
         if spark_remote:
-            builder = builder.remote(spark_remote)
-        elif profile:
-            # First try using the profile directly
+            spark = DatabricksSession.builder.remote(spark_remote).getOrCreate()
+            _namespace['spark'] = spark
+            _namespace['DatabricksSession'] = DatabricksSession
+            return "OK: Databricks Connect initialized (SPARK_REMOTE)"
+
+        # Method 2: Profile + serverless
+        if profile:
             try:
-                builder = builder.profile(profile)
-                spark = builder.getOrCreate()
+                spark = DatabricksSession.builder.profile(profile).serverless(True).getOrCreate()
                 _namespace['spark'] = spark
                 _namespace['DatabricksSession'] = DatabricksSession
-                return f"OK: Databricks Connect session initialized (profile: {profile})"
-            except Exception as profile_error:
-                # If profile auth fails (e.g., databricks-cli auth), try token cache
-                errors.append(f"Profile auth failed: {type(profile_error).__name__}")
+                return f"OK: Databricks Connect initialized (profile: {profile})"
+            except Exception as e:
+                errors.append(f"Profile failed: {e}")
 
-                if host:
-                    token = _get_token_from_cache(host)
-                    if token:
-                        # Use host + token from cache with serverless
-                        try:
-                            builder = DatabricksSession.builder.host(host).token(token).serverless(True)
-                            spark = builder.getOrCreate()
-                            _namespace['spark'] = spark
-                            _namespace['DatabricksSession'] = DatabricksSession
-                            return f"OK: Databricks Connect session initialized (serverless)"
-                        except Exception as token_error:
-                            errors.append(f"Token auth failed: {type(token_error).__name__}: {token_error}")
-                    else:
-                        errors.append(f"No token found in cache for host: {host}")
-                # Don't re-raise, fall through to error message
+        # Method 3: Token from CLI cache + serverless (fallback for databricks-cli auth)
+        if host:
+            token = _get_token_from_cache(host)
+            if token:
+                try:
+                    spark = DatabricksSession.builder.host(host).token(token).serverless(True).getOrCreate()
+                    _namespace['spark'] = spark
+                    _namespace['DatabricksSession'] = DatabricksSession
+                    return "OK: Databricks Connect initialized (token cache)"
+                except Exception as e:
+                    errors.append(f"Token cache failed: {e}")
 
-        spark = builder.getOrCreate()
-        _namespace['spark'] = spark
-        _namespace['DatabricksSession'] = DatabricksSession
-        return f"OK: Databricks Connect session initialized (profile: {profile or 'default'})"
     except ImportError as e:
-        errors.append(f"databricks.connect import failed: {e}")
+        errors.append(f"Import failed: {e}")
     except Exception as e:
-        errors.append(f"DatabricksSession error: {type(e).__name__}: {e}")
+        errors.append(f"Error: {e}")
 
-    # Provide helpful message
     error_msg = "; ".join(errors) if errors else "Unknown error"
-    return f"WARN: Spark not initialized ({error_msg}). Run spark initialization code manually."
+    return f"WARN: Spark not initialized ({error_msg}). Run 'databricks auth login' to refresh tokens."
 
 
 def handle_interrupt(signum, frame):
