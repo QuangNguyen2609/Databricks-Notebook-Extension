@@ -58,7 +58,7 @@ spark = DatabricksSession.builder.getOrCreate()
 spark = DatabricksSession.builder.remote("sc://YOUR_WORKSPACE:443/;token=YOUR_TOKEN;x-databricks-cluster-id=YOUR_CLUSTER_ID").getOrCreate()
 """)
 _df = spark.sql("""${escapedSql}""")
-_df.show()`.trim();
+display(_df)`.trim();
 }
 
 /**

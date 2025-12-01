@@ -8,14 +8,31 @@ Protocol:
 - Input (JSON line): {"id": "exec-123", "code": "x = 1\nprint(x)"}
 - Output (JSON line): {"id": "exec-123", "success": true, "stdout": "1\n", "stderr": ""}
 """
+# Standard library imports
 import sys
 import json
 import io
 import traceback
 import signal
+import os
+import configparser
+
+# Display utilities
+from display_utils import display_to_html
 
 # Persistent namespace for variable storage across cells
 _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
+
+# Storage for display() outputs
+_display_outputs = []
+
+
+def display(*args):
+    """
+    Display function that mimics Databricks display().
+    Converts DataFrames, tables, and other objects to HTML for rich visualization.
+    """
+    display_to_html(*args, display_outputs=_display_outputs)
 
 
 def _get_databricks_profile():
@@ -23,8 +40,6 @@ def _get_databricks_profile():
     Get the Databricks profile to use from environment variable only.
     No auto-selection - profile must be explicitly set by the extension.
     """
-    import os
-
     # Only use environment variable - extension sets this based on user selection
     profile = os.environ.get('DATABRICKS_CONFIG_PROFILE')
     return profile
@@ -35,8 +50,6 @@ def _get_token_from_cache(host: str) -> str | None:
     Get token from Databricks CLI token cache with EXACT host matching.
     Used as fallback when profile auth fails (e.g., databricks-cli auth type).
     """
-    import os
-
     cache_path = os.path.expanduser('~/.databricks/token-cache.json')
     if not os.path.exists(cache_path):
         return None
@@ -73,8 +86,6 @@ def _initialize_spark_session():
     """
     Initialize Databricks Connect SparkSession with serverless compute.
     """
-    import os
-    import configparser
     errors = []
 
     profile = _get_databricks_profile()
@@ -146,11 +157,19 @@ def execute_code(code: str) -> dict:
         code: Python code string to execute
 
     Returns:
-        dict with success, stdout, stderr, and optionally error
+        dict with success, stdout, stderr, display outputs, execution time, and optionally error
     """
+    import time
+    global _display_outputs
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     old_stdout, old_stderr = sys.stdout, sys.stderr
+
+    # Clear display outputs from previous execution
+    _display_outputs = []
+
+    # Track execution time
+    start_time = time.time()
 
     try:
         sys.stdout = stdout_capture
@@ -162,11 +181,20 @@ def execute_code(code: str) -> dict:
         # Execute in persistent namespace
         exec(compiled, _namespace)
 
-        return {
+        execution_time = time.time() - start_time
+
+        result = {
             'success': True,
             'stdout': stdout_capture.getvalue(),
             'stderr': stderr_capture.getvalue(),
+            'executionTime': execution_time,
         }
+
+        # Add display outputs if any
+        if _display_outputs:
+            result['displayData'] = _display_outputs
+
+        return result
     except SyntaxError as e:
         return {
             'success': False,
@@ -198,8 +226,13 @@ def execute_code(code: str) -> dict:
 
 def reset_namespace():
     """Reset the namespace to initial state and re-initialize spark."""
-    global _namespace
+    global _namespace, _display_outputs
     _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
+    _display_outputs = []
+
+    # Add display() function to namespace
+    _namespace['display'] = display
+
     # Re-initialize spark session after reset
     spark_status = _initialize_spark_session()
     return {'success': True, 'message': f'Namespace reset. {spark_status}'}
@@ -232,6 +265,9 @@ def main():
 
     # Log Python info for debugging
     python_info = f"Python {_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro} at {_sys.executable}"
+
+    # Add display() function to namespace
+    _namespace['display'] = display
 
     # Initialize Spark session if available
     spark_status = _initialize_spark_session()

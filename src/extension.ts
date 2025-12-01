@@ -12,6 +12,7 @@ import { KernelManager } from './kernels';
 import { CatalogService, SqlCompletionProvider, SqlContextParser } from './intellisense';
 import { ProfileManager } from './databricks/profileManager';
 import { DatabricksStatusBar } from './databricks/statusBar';
+import { NotebookDiagnosticProvider } from './linting';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
@@ -87,6 +88,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }).catch((error) => {
     console.error('Failed to initialize kernel manager:', error);
   });
+
+  // Initialize cross-cell linting provider
+  try {
+    const lintingProvider = new NotebookDiagnosticProvider(context);
+    context.subscriptions.push(lintingProvider);
+    console.log('Cross-cell linting provider initialized');
+  } catch (error) {
+    console.error('Failed to initialize linting provider:', error);
+    // Non-fatal error - continue without linting
+  }
 
   // Initialize SQL intellisense for catalog/schema/table completion
   catalogService = new CatalogService(() => kernelManager?.getActiveExecutor() ?? null);

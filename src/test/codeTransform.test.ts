@@ -119,7 +119,7 @@ describe('Code Transform Tests', () => {
     it('should wrap simple SQL', () => {
       const result = wrapSqlCode('SELECT 1');
       assert.ok(result.includes('spark.sql("""SELECT 1""")'));
-      assert.ok(result.includes('_df.show()'));
+      assert.ok(result.includes('display(_df)'));
     });
 
     it('should strip %sql prefix before wrapping', () => {

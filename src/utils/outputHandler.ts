@@ -20,6 +20,13 @@ export class OutputHandler {
   convertResult(result: ExecutionResult): vscode.NotebookCellOutput[] {
     const outputs: vscode.NotebookCellOutput[] = [];
 
+    // Handle display() outputs first (they should appear before stdout)
+    if (result.displayData && result.displayData.length > 0) {
+      for (const htmlData of result.displayData) {
+        outputs.push(this.createHtmlOutput(htmlData));
+      }
+    }
+
     // Handle stdout
     if (result.stdout && result.stdout.trim()) {
       outputs.push(new vscode.NotebookCellOutput([
