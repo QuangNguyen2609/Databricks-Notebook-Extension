@@ -1,8 +1,8 @@
 {
   "name": "databricks-notebook-viewer",
   "displayName": "Databricks Notebook Viewer",
-  "description": "Visualize Databricks .py notebooks with proper cell rendering, syntax highlighting, and markdown support",
-  "version": "0.1.1",
+  "description": "Visualize Databricks .py notebooks with proper cell rendering, syntax highlighting, markdown support, and multi-profile authentication management",
+  "version": "0.2.0",
   "publisher": "databricks-notebook-viewer",
   "engines": {
     "vscode": "^1.80.0"
@@ -62,6 +62,18 @@
         "title": "Interrupt Kernel",
         "category": "Databricks",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "databricks-notebook.selectProfile",
+        "title": "Select Databricks Profile",
+        "category": "Databricks",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "databricks-notebook.refreshProfiles",
+        "title": "Refresh Databricks Profiles",
+        "category": "Databricks",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -114,6 +126,16 @@
           "type": "boolean",
           "default": true,
           "description": "Enable scrollable output for large cell outputs (sets notebook.output.scrolling)"
+        },
+        "databricks-notebook.defaultProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Default Databricks profile to use on startup. Leave empty to remember last selection."
+        },
+        "databricks-notebook.showProfileInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the current Databricks profile in the status bar"
         }
       },
       "configurationDefaults": {
@@ -127,7 +149,7 @@
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "type-check": "tsc --noEmit",
-    "lint": "eslint src --ext ts",
+    "lint": "eslint src --ext ts --max-warnings 50",
     "lint:fix": "eslint src --ext ts --fix",
     "test": "node ./out/test/runTest.js",
     "test:unit": "mocha --require ts-node/register src/test/**/*.test.ts",

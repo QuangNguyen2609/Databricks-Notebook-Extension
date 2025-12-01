@@ -10,12 +10,17 @@ import * as vscode from 'vscode';
 import { DatabricksNotebookSerializer, checkIsDatabricksNotebook } from './serializer';
 import { KernelManager } from './kernels';
 import { CatalogService, SqlCompletionProvider, SqlContextParser } from './intellisense';
+import { ProfileManager } from './databricks/profileManager';
+import { DatabricksStatusBar } from './databricks/statusBar';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
 
 // Global catalog service for SQL intellisense
 let catalogService: CatalogService | undefined;
+
+// Global profile manager for Databricks authentication
+let profileManager: ProfileManager | undefined;
 
 // Track documents currently being processed to avoid race conditions
 const processingDocuments = new Set<string>();
@@ -45,8 +50,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
+  // Initialize ProfileManager for Databricks authentication
+  profileManager = new ProfileManager(context);
+  context.subscriptions.push(profileManager);
+  await profileManager.loadProfiles();
+
+  // Initialize Status Bar (if enabled in settings)
+  const config = vscode.workspace.getConfiguration('databricks-notebook');
+  if (config.get<boolean>('showProfileInStatusBar', true)) {
+    const statusBar = new DatabricksStatusBar(profileManager);
+    context.subscriptions.push(statusBar);
+  }
+
+  // Register profile selection commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand('databricks-notebook.selectProfile', async () => {
+      if (profileManager) {
+        await showProfileQuickPick(profileManager);
+      }
+    }),
+    vscode.commands.registerCommand('databricks-notebook.refreshProfiles', async () => {
+      if (profileManager) {
+        await profileManager.loadProfiles();
+        vscode.window.showInformationMessage('Databricks profiles refreshed');
+      }
+    })
+  );
+
   // Initialize kernel manager for Python execution support
-  kernelManager = new KernelManager(context.extensionPath);
+  kernelManager = new KernelManager(context.extensionPath, profileManager);
   context.subscriptions.push(kernelManager);
 
   // Initialize asynchronously (discovers Python environments)
@@ -682,6 +714,49 @@ function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEvent): v
 }
 
 /**
+ * Show Quick Pick to select Databricks profile
+ */
+async function showProfileQuickPick(manager: ProfileManager): Promise<void> {
+  const profiles = manager.getAllProfiles();
+
+  if (profiles.length === 0) {
+    vscode.window.showInformationMessage(
+      'No Databricks profiles found in ~/.databrickscfg. Run "databricks auth login" to configure authentication.'
+    );
+    return;
+  }
+
+  const currentName = manager.getSelectedProfileName();
+
+  // Create Quick Pick items
+  const items: (vscode.QuickPickItem & { profileName?: string })[] = profiles.map(p => ({
+    label: p.name === currentName ? `$(check) ${p.name}` : p.name,
+    description: p.host,
+    detail: p.authType ? `Auth: ${p.authType}` : undefined,
+    profileName: p.name
+  }));
+
+  // Add separator and refresh option
+  items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+  items.push({
+    label: '$(refresh) Refresh Profiles',
+    description: 'Re-read ~/.databrickscfg'
+  });
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select Databricks profile',
+    title: 'Databricks Profile'
+  });
+
+  if (selected?.profileName) {
+    await manager.selectProfile(selected.profileName);
+  } else if (selected?.label.includes('Refresh')) {
+    await manager.loadProfiles();
+    vscode.window.showInformationMessage('Databricks profiles refreshed');
+  }
+}
+
+/**
  * Extension deactivation
  * Called when VS Code deactivates the extension
  */
@@ -697,4 +772,7 @@ export function deactivate(): void {
 
   // Kernel manager is disposed via context.subscriptions, but clear reference
   kernelManager = undefined;
+
+  // Profile manager is disposed via context.subscriptions, but clear reference
+  profileManager = undefined;
 }

@@ -84,7 +84,7 @@ describe('SQL Context Parser Tests', () => {
 
     it('should detect column context in WHERE clause', () => {
       const sql = 'SELECT * FROM catalog.schema.orders WHERE orders.';
-      const _result = parser.parse(sql, sql.length);
+      parser.parse(sql, sql.length);
       // This might not detect column context without proper table references
       // The parser needs table references to be extracted first
     });

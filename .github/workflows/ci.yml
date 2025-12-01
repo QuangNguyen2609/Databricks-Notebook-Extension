@@ -85,8 +85,8 @@ jobs:
       - name: Create/Update Latest Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
-          name: Latest Build (v${{ steps.version.outputs.VERSION }})
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: v${{ steps.version.outputs.VERSION }}
           body: |
             **Latest development build**
 
@@ -156,16 +156,61 @@ jobs:
       - name: Create VSIX package
         run: npx @vscode/vsce package
 
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract CHANGELOG for version
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Extract the section for this version from CHANGELOG.md
+          if [ -f "CHANGELOG.md" ]; then
+            CHANGELOG_CONTENT=$(awk -v ver="$VERSION" '
+              /^## \['"$VERSION"'\]/ { found=1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md | sed '/^$/d' | head -c 10000)
+          else
+            CHANGELOG_CONTENT=""
+          fi
+
+          # If no specific version found or content is empty, use a default message
+          if [ -z "$CHANGELOG_CONTENT" ] || [ "${CHANGELOG_CONTENT// /}" = "" ]; then
+            CHANGELOG_CONTENT="Release version $VERSION
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full release notes."
+          fi
+
+          # Write to output using heredoc to handle multiline content
+          {
+            echo "CONTENT<<EOF"
+            echo "$CHANGELOG_CONTENT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+        continue-on-error: false
+
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vsix-package
+          name: vsix-package-${{ steps.version.outputs.VERSION }}
           path: '*.vsix'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: '*.vsix'
-          generate_release_notes: true
+          body: |
+            ## Release v${{ steps.version.outputs.VERSION }}
+
+            ${{ steps.changelog.outputs.CONTENT }}
+
+            ---
+
+            **Installation:**
+            1. Download the `.vsix` file below
+            2. In VS Code: `Ctrl+Shift+P` → "Extensions: Install from VSIX..."
+            3. Select the downloaded file
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

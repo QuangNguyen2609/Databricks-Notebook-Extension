@@ -10,6 +10,11 @@ A VS Code extension that renders Databricks `.py` notebook files as proper noteb
 - **Magic Command Interpretation**: Automatic detection of `%md`, `%sql`, `%python`, `%run`, `%sh`, `%fs`, `%pip` commands
 - **Cell Titles**: Support for `DBTITLE` metadata
 - **Round-trip Editing**: Edit and save notebooks while preserving Databricks format
+- **Multi-Profile Authentication**: Manage and switch between multiple Databricks profiles
+  - Status bar indicator showing current profile
+  - Quick Pick selector for easy profile switching
+  - Automatic kernel restart on profile change
+  - Workspace-level profile persistence
 
 ## Supported Cell Types
 
@@ -57,6 +62,51 @@ Search for "Databricks Notebook Viewer" in the VS Code Extensions Marketplace.
 
 3. **Auto-detection**: When opening a file that starts with `# Databricks notebook source`, you'll be prompted to open it as a notebook
 
+### Managing Databricks Profiles
+
+The extension supports managing multiple Databricks authentication profiles from your `~/.databrickscfg` file.
+
+#### Profile Selection
+
+1. **Status Bar**: Click the cloud icon in the status bar (bottom right) showing your current profile
+2. **Command Palette**: Use `Ctrl+Shift+P` and type "Select Databricks Profile"
+3. **Quick Pick**: Choose from the list of available profiles with host information
+
+The status bar shows:
+- `$(cloud) profile-name` - Profile is selected and active
+- `$(cloud) No Profile` - No profile selected (yellow warning)
+- `$(cloud) No Config` - No `~/.databrickscfg` file found (red error)
+
+#### Profile Configuration
+
+Profiles are read from `~/.databrickscfg`. Set up your profiles using the Databricks CLI:
+
+```bash
+# Login to Databricks (creates/updates profile)
+databricks auth login --host https://your-workspace.cloud.databricks.com
+
+# Login with a specific profile name
+databricks auth login --host https://prod.cloud.databricks.com --profile prod
+```
+
+Example `~/.databrickscfg`:
+```ini
+[DEFAULT]
+host = https://dev.cloud.databricks.com
+auth_type = databricks-cli
+
+[prod]
+host = https://prod.cloud.databricks.com
+auth_type = databricks-cli
+```
+
+#### Profile Switching
+
+When you switch profiles:
+1. The extension updates the environment variable for the Python kernel
+2. Any running kernels are automatically restarted with the new profile
+3. Your selection is saved per workspace
+
 ### Configuration
 
 Configure the extension in VS Code settings (`Cmd+,` or `Ctrl+,`):
@@ -65,12 +115,17 @@ Configure the extension in VS Code settings (`Cmd+,` or `Ctrl+,`):
 |---------|---------|-------------|
 | `databricks-notebook.autoOpenNotebooks` | `false` | Automatically open detected Databricks notebooks in notebook view |
 | `databricks-notebook.showNotification` | `true` | Show notification prompt when a Databricks notebook is detected |
+| `databricks-notebook.defaultProfile` | `""` | Default Databricks profile to use on startup (leave empty to remember last selection) |
+| `databricks-notebook.showProfileInStatusBar` | `true` | Show the current Databricks profile in the status bar |
+| `databricks-notebook.pythonExecutionTimeout` | `60000` | Timeout for Python cell execution in milliseconds |
 
 **Example settings.json:**
 ```json
 {
   "databricks-notebook.autoOpenNotebooks": true,
-  "databricks-notebook.showNotification": true
+  "databricks-notebook.showNotification": true,
+  "databricks-notebook.defaultProfile": "prod",
+  "databricks-notebook.showProfileInStatusBar": true
 }
 ```
 
