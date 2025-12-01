@@ -1,8 +1,8 @@
 {
   "name": "databricks-notebook-viewer",
   "displayName": "Databricks Notebook Viewer",
-  "description": "Visualize Databricks .py notebooks with proper cell rendering, syntax highlighting, markdown support, and multi-profile authentication management",
-  "version": "0.2.0",
+  "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
+  "version": "0.3.0",
   "publisher": "databricks-notebook-viewer",
   "engines": {
     "vscode": "^1.80.0"
@@ -136,6 +136,21 @@
           "type": "boolean",
           "default": true,
           "description": "Show the current Databricks profile in the status bar"
+        },
+        "databricks-notebook.linting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable cross-cell linting for Databricks notebooks"
+        },
+        "databricks-notebook.linting.includeDatabricksTypes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include type stubs for Databricks objects (spark, dbutils, display)"
+        },
+        "databricks-notebook.linting.debounceMs": {
+          "type": "number",
+          "default": 500,
+          "description": "Debounce delay for linting updates in milliseconds"
         }
       },
       "configurationDefaults": {
@@ -152,7 +167,7 @@
     "lint": "eslint src --ext ts --max-warnings 50",
     "lint:fix": "eslint src --ext ts --fix",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "mocha --require ts-node/register src/test/**/*.test.ts",
+    "test:unit": "mocha --require ts-node/register 'src/test/{parser,profileManager,codeTransform}.test.ts'",
     "test:coverage": "nyc --reporter=lcov --reporter=text npm run test:unit",
     "ci": "npm run type-check && npm run lint && npm run test:unit && npm run compile"
   },

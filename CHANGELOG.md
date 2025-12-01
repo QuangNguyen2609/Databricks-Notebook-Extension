@@ -5,6 +5,44 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-12-01
+
+### Added
+- **Rich DataFrame Display with Databricks Minimal Dark Theme**
+  - `display()` function for rendering Spark and Pandas DataFrames as HTML tables
+  - Databricks-inspired dark theme (#1e1e1e background, #252526 headers)
+  - Null value badges with gray pill styling
+  - Execution time tracking and display
+  - Row count information: "Showing X of Y rows" when limited
+  - CSV download button (downloads displayed rows only, not all data)
+
+- **Interactive Table Features**
+  - Column sorting with intelligent data type detection
+    - Numeric sorting (handles scientific notation)
+    - Alphabetical sorting (case-insensitive)
+    - Boolean sorting (false < true)
+    - Null values always sorted to the end
+  - Visual sort indicators: ⇅ (hover), ▲ (ascending), ▼ (descending)
+  - Column resizing: Drag right edge of column headers
+  - Vertical column delimiters for better readability
+  - Hover tooltips showing full cell content
+  - Double-click cells to toggle text wrapping
+
+- **SQL Cell Display Integration**
+  - SQL cells now use `display()` instead of `.show()` for rich output
+  - Automatic DataFrame visualization for SQL query results
+  - Consistent styling across Python and SQL outputs
+
+- **Cross-Cell Python Linting**
+  - Virtual document generation for pyright analysis across notebook cells
+  - Variables defined in previous cells are recognized in subsequent cells
+  - Databricks type stubs for `spark`, `dbutils`, and `display` objects
+  - Diagnostic mapping from virtual documents back to individual cells
+  - Configuration options:
+    - `databricks-notebook.linting.enabled`: Enable/disable linting (default: true)
+    - `databricks-notebook.linting.includeDatabricksTypes`: Include Databricks type stubs (default: true)
+    - `databricks-notebook.linting.debounceMs`: Debounce delay for updates (default: 500ms)
+
 ## [0.2.0] - 2025-12-01
 
 ### Added

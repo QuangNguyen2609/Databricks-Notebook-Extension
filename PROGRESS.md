@@ -223,14 +223,22 @@ src/
 │   ├── kernelManager.ts      # Manages multiple Python kernel controllers
 │   ├── pythonKernelController.ts  # NotebookController per interpreter
 │   └── persistentExecutor.ts # Persistent Python process manager
+├── linting/
+│   ├── index.ts              # Linting module exports
+│   ├── virtualDocumentGenerator.ts  # Generates shadow .py files
+│   ├── diagnosticMapper.ts  # Maps diagnostics to cells
+│   └── notebookDiagnosticProvider.ts  # Orchestrates linting
 ├── utils/
 │   ├── pythonExtensionApi.ts # Python extension API wrapper
-│   └── outputHandler.ts      # Execution output conversion
+│   ├── outputHandler.ts      # Execution output conversion
+│   └── codeTransform.ts      # Code transformation utilities
 ├── python/
-│   └── kernel_runner.py      # Python script for persistent execution
+│   ├── kernel_runner.py      # Python script for persistent execution
+│   └── display_utils.py      # DataFrame display and HTML generation
 └── test/
     ├── parser.test.ts        # Comprehensive parser tests
     ├── profileManager.test.ts # ProfileManager unit tests
+    ├── linting.test.ts       # Linting tests
     ├── runTest.ts            # Test runner
     └── suite/index.ts        # Test suite configuration
 ```
@@ -271,17 +279,65 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ---
 
+### Phase 8: Rich DataFrame Display and Linting
+
+#### Display Function (`src/python/display_utils.py`)
+- [x] **Databricks `display()` function** for rich DataFrame visualization
+- [x] **Spark DataFrame support**: Renders Spark DataFrames as HTML tables
+- [x] **Pandas DataFrame support**: Renders Pandas DataFrames as HTML tables
+- [x] **List and dict support**: Converts Python data structures to HTML tables
+- [x] **Databricks minimal dark theme**: Matches Databricks notebook styling
+  - Dark background (#1e1e1e)
+  - Header background (#252526)
+  - Borders (#3a3a3a, #2d2d2d)
+- [x] **Null value badges**: Displays null values as gray pills
+- [x] **Execution time tracking**: Shows runtime in table footer
+- [x] **Row count display**: Shows "Showing X of Y rows" when limited
+- [x] **CSV download button**: Downloads displayed data as CSV file
+
+#### Interactive Table Features
+- [x] **Column sorting** with intelligent data type detection
+  - Automatically detects numbers, strings, booleans, and nulls
+  - Numeric sorting (including scientific notation)
+  - Alphabetical sorting (case-insensitive)
+  - Boolean sorting (false < true)
+  - Nulls always sorted to the end
+- [x] **Visual sort indicators**: ⇅ (hover), ▲ (ascending), ▼ (descending)
+- [x] **Column resizing**: Drag right edge of column headers to adjust width
+- [x] **Vertical column delimiters**: Clear borders between columns
+- [x] **Hover tooltips**: Show full cell content on hover
+- [x] **Double-click expansion**: Toggle text wrapping for long content
+- [x] **Sticky headers**: Column headers remain visible when scrolling
+
+#### Cross-Cell Linting (`src/linting/`)
+- [x] **Virtual document generation**: Creates shadow .py files for pyright analysis
+- [x] **Diagnostic mapping**: Converts line numbers from virtual docs to cells
+- [x] **Databricks type stubs**: Provides type hints for spark, dbutils, display
+- [x] **Notebook diagnostic provider**: Orchestrates linting across cells
+- [x] **Configuration options**:
+  - `databricks-notebook.linting.enabled`: Enable/disable linting
+  - `databricks-notebook.linting.includeDatabricksTypes`: Include Databricks type stubs
+  - `databricks-notebook.linting.debounceMs`: Debounce delay for updates
+
+#### Kernel Improvements
+- [x] **Display outputs**: Capture HTML outputs from `display()` function
+- [x] **Execution time**: Track and report runtime for each cell
+- [x] **Display namespace**: Add `display()` to persistent namespace
+- [x] **SQL cell display**: SQL cells use `display()` instead of `.show()`
+
+---
+
 ## Known Limitations
 
 1. **Brief flash on auto-open**: The text editor briefly appears before being replaced. This is unavoidable because VS Code's `onDidOpenTextDocument` fires after the editor opens.
 
-2. **Basic output only**: Python execution captures stdout/stderr but doesn't support rich outputs (matplotlib plots, DataFrames) yet.
+2. **Non-Python cells**: Scala and R cells show informational messages but require Databricks runtime for execution.
 
-3. **Non-Python cells**: SQL, Scala, and R cells show informational messages but require Databricks runtime for execution.
+3. **No syntax validation**: The parser doesn't validate that the content within cells is valid code.
 
-4. **No syntax validation**: The parser doesn't validate that the content within cells is valid code.
+4. **Kernel restart required**: To clear variables, the kernel must be restarted.
 
-5. **Kernel restart required**: To clear variables, the kernel must be restarted.
+5. **Matplotlib plots**: While DataFrames are richly rendered, matplotlib plots are not yet supported (output as text only).
 
 ---
 
@@ -292,7 +348,8 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 - [x] ~~Databricks Connect integration for Spark operations~~ Auto-initializes with serverless
 - [x] ~~Git integration for better notebook diffs~~ Round-trip preservation minimizes diffs
 - [x] ~~Scrollable output for large errors~~ Enabled via `notebook.output.scrolling` default
-- [ ] Rich output support (matplotlib, DataFrames, HTML)
+- [x] ~~Rich output support for DataFrames~~ Implemented with display() function
+- [ ] Matplotlib plot rendering
 - [ ] Cluster selection UI
 - [ ] Cell folding
 - [ ] Table of contents from markdown headers
@@ -303,7 +360,20 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.2.0 (Current)
+### v0.3.0 (Current)
+- **Rich DataFrame Display**: Databricks-style `display()` function with minimal dark theme
+  - HTML table rendering for Spark and Pandas DataFrames
+  - Null value badges, execution time tracking, row count display
+  - CSV download button (downloads displayed rows only)
+- **Interactive Table Features**: Column sorting, resizing, tooltips, and delimiters
+  - Intelligent data type detection for sorting (numbers, strings, booleans, nulls)
+  - Visual sort indicators (⇅, ▲, ▼)
+  - Drag to resize columns
+- **Cross-Cell Linting**: Virtual document generation for pyright analysis across cells
+  - Databricks type stubs for spark, dbutils, display
+  - Configuration options for enabling/disabling linting
+
+### v0.2.0
 - **Multi-Profile Authentication Management**: Full UI for selecting and switching between Databricks profiles
   - ProfileManager class for reading and managing `~/.databrickscfg` profiles
   - Status bar indicator showing current profile (`$(cloud) profile-name`)

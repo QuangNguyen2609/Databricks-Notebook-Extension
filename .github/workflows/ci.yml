@@ -82,20 +82,58 @@ jobs:
           path: '*.vsix'
           retention-days: 90
 
+      - name: Extract CHANGELOG for version
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Check if CHANGELOG.md exists
+          if [ ! -f "CHANGELOG.md" ]; then
+            echo "::error::CHANGELOG.md not found"
+            exit 1
+          fi
+
+          # Extract the section for this version from CHANGELOG.md
+          CHANGELOG_CONTENT=$(awk -v ver="$VERSION" '
+            /^## \['"$VERSION"'\]/ { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed '/^$/d' | head -c 10000)
+
+          # Fail if no specific version found or content is empty
+          if [ -z "$CHANGELOG_CONTENT" ] || [ "${CHANGELOG_CONTENT// /}" = "" ]; then
+            echo "::error::No CHANGELOG entry found for version [$VERSION] in CHANGELOG.md"
+            echo "::error::Please add a changelog entry with format: ## [$VERSION]"
+            exit 1
+          fi
+
+          # Write to output using heredoc to handle multiline content
+          {
+            echo "CONTENT<<EOF"
+            echo "$CHANGELOG_CONTENT"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
       - name: Create/Update Latest Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: v${{ steps.version.outputs.VERSION }}
           body: |
+            ${{ steps.changelog.outputs.CONTENT }}
+
+            ---
+
+            **Installation:**
+            1. Download the `.vsix` file below
+            2. In VS Code: `Ctrl+Shift+P` → "Extensions: Install from VSIX..."
+            3. Select the downloaded file
+
+            ---
+
             **Latest development build**
-
-            Version: `${{ steps.version.outputs.VERSION }}`
-            Commit: `${{ github.sha }}`
-
-            Download the `.vsix` file below and install in VS Code:
-            1. `Ctrl+Shift+P` → "Extensions: Install from VSIX..."
-            2. Select the downloaded file
+            - Version: `${{ steps.version.outputs.VERSION }}`
+            - Commit: `${{ github.sha }}`
           files: '*.vsix'
           prerelease: true
         env:
@@ -165,22 +203,24 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
 
-          # Extract the section for this version from CHANGELOG.md
-          if [ -f "CHANGELOG.md" ]; then
-            CHANGELOG_CONTENT=$(awk -v ver="$VERSION" '
-              /^## \['"$VERSION"'\]/ { found=1; next }
-              found && /^## \[/ { exit }
-              found { print }
-            ' CHANGELOG.md | sed '/^$/d' | head -c 10000)
-          else
-            CHANGELOG_CONTENT=""
+          # Check if CHANGELOG.md exists
+          if [ ! -f "CHANGELOG.md" ]; then
+            echo "::error::CHANGELOG.md not found"
+            exit 1
           fi
 
-          # If no specific version found or content is empty, use a default message
-          if [ -z "$CHANGELOG_CONTENT" ] || [ "${CHANGELOG_CONTENT// /}" = "" ]; then
-            CHANGELOG_CONTENT="Release version $VERSION
+          # Extract the section for this version from CHANGELOG.md
+          CHANGELOG_CONTENT=$(awk -v ver="$VERSION" '
+            /^## \['"$VERSION"'\]/ { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed '/^$/d' | head -c 10000)
 
-          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full release notes."
+          # Fail if no specific version found or content is empty
+          if [ -z "$CHANGELOG_CONTENT" ] || [ "${CHANGELOG_CONTENT// /}" = "" ]; then
+            echo "::error::No CHANGELOG entry found for version [$VERSION] in CHANGELOG.md"
+            echo "::error::Please add a changelog entry with format: ## [$VERSION]"
+            exit 1
           fi
 
           # Write to output using heredoc to handle multiline content
@@ -189,7 +229,6 @@ jobs:
             echo "$CHANGELOG_CONTENT"
             echo "EOF"
           } >> $GITHUB_OUTPUT
-        continue-on-error: false
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4

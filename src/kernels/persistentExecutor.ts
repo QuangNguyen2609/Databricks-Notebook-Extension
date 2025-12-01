@@ -26,6 +26,8 @@ export interface ExecutionResult {
   errorType?: string;
   /** Line number where error occurred */
   lineNumber?: number;
+  /** Display outputs from display() function (HTML strings) */
+  displayData?: string[];
 }
 
 /**
@@ -51,6 +53,7 @@ interface KernelResponse {
   lineNumber?: number;
   message?: string;
   variables?: Record<string, { type: string; repr: string }>;
+  displayData?: string[];  // HTML outputs from display()
   // Python protocol uses snake_case
   // eslint-disable-next-line @typescript-eslint/naming-convention
   spark_status?: string;
@@ -267,6 +270,7 @@ export class PersistentExecutor implements vscode.Disposable {
         error: response.error,
         errorType: response.errorType,
         lineNumber: response.lineNumber,
+        displayData: response.displayData,
       };
     } catch (error) {
       return {
