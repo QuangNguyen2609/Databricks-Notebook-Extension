@@ -30,6 +30,8 @@ export interface PythonEnvironment {
  * Wrapper class for the Python extension API
  */
 export class PythonExtensionApi {
+  // Python extension API doesn't provide proper TypeScript types
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pythonApi: any;
   private initialized = false;
   private _onDidChangeEnvironments = new vscode.EventEmitter<void>();
@@ -541,6 +543,8 @@ export class PythonExtensionApi {
   /**
    * Convert Python extension environment object to our PythonEnvironment interface
    */
+  // Python extension API doesn't provide proper TypeScript types
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private convertToPythonEnvironment(env: any): PythonEnvironment | undefined {
     if (!env) {
       return undefined;

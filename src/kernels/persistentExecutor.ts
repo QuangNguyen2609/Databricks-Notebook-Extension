@@ -51,6 +51,8 @@ interface KernelResponse {
   lineNumber?: number;
   message?: string;
   variables?: Record<string, { type: string; repr: string }>;
+  // Python protocol uses snake_case
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   spark_status?: string;
 }
 
@@ -191,8 +193,10 @@ export class PersistentExecutor implements vscode.Disposable {
       if (response.type === 'ready') {
         this.isReady = true;
         this._onDidChangeState.fire('ready');
-        // Log Python info
+        // Log Python info (Python protocol uses snake_case)
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         if ((response as { python_info?: string }).python_info) {
+          // eslint-disable-next-line @typescript-eslint/naming-convention
           console.debug(`[Executor] ${(response as { python_info?: string }).python_info}`);
         }
         // Store and log spark status

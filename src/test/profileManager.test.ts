@@ -6,8 +6,8 @@ import * as os from 'os';
 // Mock VS Code API
 const mockVscode = {
   EventEmitter: class<T> {
-    private listeners: Array<(e: T) => any> = [];
-    public event = (listener: (e: T) => any) => {
+    private listeners: Array<(e: T) => void> = [];
+    public event = (listener: (e: T) => void) => {
       this.listeners.push(listener);
       return { dispose: () => {} };
     };
@@ -26,7 +26,7 @@ const mockVscode = {
       dispose: () => {},
     }),
     getConfiguration: () => ({
-      get: (key: string): any => undefined,
+      get: (_key: string): unknown => undefined,
     }),
   },
   window: {
@@ -42,41 +42,59 @@ const mockVscode = {
     }
   },
   Uri: {
-    joinPath: (uri: any, ...pathSegments: string[]) => ({
+    joinPath: (uri: { fsPath: string }, ...pathSegments: string[]) => ({
       fsPath: path.join(uri.fsPath, ...pathSegments)
     }),
   },
 };
 
 // Replace vscode import with mock
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const Module = require('module');
 const originalRequire = Module.prototype.require;
-Module.prototype.require = function(id: string) {
+Module.prototype.require = function(id: string, ...args: unknown[]) {
   if (id === 'vscode') {
     return mockVscode;
   }
-  return originalRequire.apply(this, arguments);
+  return originalRequire.apply(this, [id, ...args]);
 };
 
 // Now import ProfileManager
-import { ProfileManager, DatabricksProfile } from '../databricks/profileManager';
+import { ProfileManager } from '../databricks/profileManager';
+import type * as vscode from 'vscode';
+
+interface MockWorkspaceState {
+  storage: Map<string, unknown>;
+  get(key: string): unknown;
+  update(key: string, value: unknown): Promise<void>;
+}
+
+interface MockContext {
+  subscriptions: unknown[];
+  workspaceState: MockWorkspaceState;
+  globalState: {
+    get: (key: string) => unknown;
+    update: (key: string, value: unknown) => Promise<void>;
+  };
+}
+
 
 describe('ProfileManager', () => {
   let testConfigPath: string;
 
   // Mock extension context
-  const mockContext = {
+  const mockContext: MockContext = {
     subscriptions: [],
     workspaceState: {
-      storage: new Map<string, any>(),
+      storage: new Map<string, unknown>(),
       get: function(key: string) { return this.storage.get(key); },
-      update: async function(key: string, value: any) { this.storage.set(key, value); },
+      update: async function(key: string, value: unknown) { this.storage.set(key, value); },
     },
     globalState: {
-      get: (key: string) => undefined,
-      update: async (key: string, value: any) => {},
+      get: (_key: string) => undefined,
+      update: async (_key: string, _value: unknown) => {},
     },
-  } as any;
+  };
 
   beforeEach(() => {
     // Create a temporary config file for testing
@@ -100,7 +118,9 @@ auth_type = databricks-cli
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -125,7 +145,9 @@ cluster_id = 1234-567890-abcdef
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -158,7 +180,9 @@ host = https://staging.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -177,7 +201,9 @@ host = https://valid.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -195,7 +221,9 @@ auth_type=databricks-cli
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -218,7 +246,9 @@ host = https://prod.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -240,7 +270,9 @@ host = https://prod.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -261,7 +293,9 @@ host = https://prod.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -286,7 +320,9 @@ host = https://dev.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -310,7 +346,9 @@ host = https://prod.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -323,7 +361,9 @@ host = https://prod.cloud.databricks.com
     });
 
     it('should return empty array when no config file', async () => {
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = path.join(os.tmpdir(), 'nonexistent-config');
 
       await manager.loadProfiles();
@@ -333,7 +373,9 @@ host = https://prod.cloud.databricks.com
     });
 
     it('hasProfiles should return false when no profiles', async () => {
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = path.join(os.tmpdir(), 'nonexistent-config');
 
       await manager.loadProfiles();
@@ -348,7 +390,9 @@ host = https://dev.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -370,10 +414,12 @@ host = https://prod.cloud.databricks.com
 
       // Mock config to return defaultProfile
       mockVscode.workspace.getConfiguration = () => ({
-        get: (key: string): any => key === 'defaultProfile' ? 'prod' : undefined,
+        get: (key: string): unknown => key === 'defaultProfile' ? 'prod' : undefined,
       });
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -396,7 +442,9 @@ host = https://prod.cloud.databricks.com
       // Pre-populate workspace state
       mockContext.workspaceState.storage.set('databricks.selectedProfile', 'dev');
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
@@ -417,7 +465,9 @@ host = https://test.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       // Should not throw
@@ -435,7 +485,9 @@ host = https://dev.cloud.databricks.com
 `;
       fs.writeFileSync(testConfigPath, configContent);
 
-      const manager = new ProfileManager(mockContext);
+      const manager = new ProfileManager(mockContext as unknown as vscode.ExtensionContext);
+      // Access private property for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).configPath = testConfigPath;
 
       await manager.loadProfiles();
