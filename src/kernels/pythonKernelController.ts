@@ -20,11 +20,12 @@ import {
  */
 export class PythonKernelController implements vscode.Disposable {
   private readonly controller: vscode.NotebookController;
-  private executor: PersistentExecutor | null = null;
+  public executor: PersistentExecutor | null = null;
   private executionOrder = 0;
   private outputHandler: OutputHandler;
   private disposables: vscode.Disposable[] = [];
   private isExecuting = false;
+  private profileProvider: (() => string | undefined) | undefined;
 
   /**
    * Create a new PythonKernelController
@@ -32,12 +33,15 @@ export class PythonKernelController implements vscode.Disposable {
    * @param environment - The Python environment this controller uses
    * @param notebookType - The notebook type this controller handles
    * @param extensionPath - Path to the extension directory
+   * @param profileProvider - Optional function to get the current Databricks profile name
    */
   constructor(
     private readonly environment: PythonEnvironment,
     notebookType: string,
-    private readonly extensionPath: string
+    private readonly extensionPath: string,
+    profileProvider?: () => string | undefined
   ) {
+    this.profileProvider = profileProvider;
     const controllerId = `databricks-python-${this.sanitizeId(environment.id)}`;
 
     this.controller = vscode.notebooks.createNotebookController(
@@ -172,11 +176,13 @@ export class PythonKernelController implements vscode.Disposable {
 
       // Get or create executor
       if (!this.executor) {
-        console.debug(`[Kernel] Creating executor with Python: ${this.environment.path}`);
+        const profileName = this.profileProvider?.();
+        console.debug(`[Kernel] Creating executor with Python: ${this.environment.path}, profile: ${profileName || 'none'}`);
         this.executor = new PersistentExecutor(
           this.environment.path,
           this.extensionPath,
-          this.getWorkingDirectory(notebook)
+          this.getWorkingDirectory(notebook),
+          profileName
         );
       }
 
@@ -342,11 +348,13 @@ export class PythonKernelController implements vscode.Disposable {
    */
   ensureExecutor(notebook: vscode.NotebookDocument): void {
     if (!this.executor) {
-      console.debug(`[Kernel] Creating executor for intellisense: ${this.environment.path}`);
+      const profileName = this.profileProvider?.();
+      console.debug(`[Kernel] Creating executor for intellisense: ${this.environment.path}, profile: ${profileName || 'none'}`);
       this.executor = new PersistentExecutor(
         this.environment.path,
         this.extensionPath,
-        this.getWorkingDirectory(notebook)
+        this.getWorkingDirectory(notebook),
+        profileName
       );
     }
   }

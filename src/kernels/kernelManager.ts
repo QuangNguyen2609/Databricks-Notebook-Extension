@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import { PythonExtensionApi, PythonEnvironment } from '../utils/pythonExtensionApi';
 import { PythonKernelController } from './pythonKernelController';
 import { PersistentExecutor } from './persistentExecutor';
+import { ProfileManager } from '../databricks/profileManager';
 
 /**
  * Manages all Python kernel controllers for the Databricks notebook type
@@ -19,6 +20,7 @@ export class KernelManager implements vscode.Disposable {
   private controllers: Map<string, PythonKernelController> = new Map();
   private disposables: vscode.Disposable[] = [];
   private extensionPath: string;
+  private profileManager: ProfileManager | undefined;
   private initialized = false;
 
   /** Event emitter for controller changes */
@@ -29,10 +31,22 @@ export class KernelManager implements vscode.Disposable {
    * Create a new KernelManager
    *
    * @param extensionPath - Path to the extension directory
+   * @param profileManager - Optional ProfileManager for Databricks profile selection
    */
-  constructor(extensionPath: string) {
+  constructor(extensionPath: string, profileManager?: ProfileManager) {
     this.extensionPath = extensionPath;
+    this.profileManager = profileManager;
     this.pythonApi = new PythonExtensionApi();
+
+    // Subscribe to profile changes to restart kernels
+    if (this.profileManager) {
+      this.disposables.push(
+        this.profileManager.onDidChangeProfile(async (profileName) => {
+          console.debug(`[KernelManager] Profile changed to: ${profileName || 'none'}, restarting kernels...`);
+          await this.onProfileChanged(profileName);
+        })
+      );
+    }
   }
 
   /**
@@ -118,10 +132,17 @@ export class KernelManager implements vscode.Disposable {
     for (const env of environments) {
       if (!this.controllers.has(env.id)) {
         console.debug(`[KernelManager] Creating controller for: ${env.displayName} (${env.path})`);
+
+        // Create profile provider function if ProfileManager exists
+        const profileProvider = this.profileManager
+          ? () => this.profileManager?.getSelectedProfileName() ?? undefined
+          : undefined;
+
         const controller = new PythonKernelController(
           env,
           this.notebookType,
-          this.extensionPath
+          this.extensionPath,
+          profileProvider
         );
         this.controllers.set(env.id, controller);
       }
@@ -164,6 +185,27 @@ export class KernelManager implements vscode.Disposable {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Handle profile change by updating all executors
+   */
+  private async onProfileChanged(profileName: string | null): Promise<void> {
+    // Notify user
+    if (profileName) {
+      vscode.window.showInformationMessage(
+        `Switching to Databricks profile "${profileName}". Restarting active kernels...`
+      );
+    }
+
+    // Restart all active executors with new profile
+    const restartPromises: Promise<void>[] = [];
+    for (const controller of this.controllers.values()) {
+      if (controller.executor?.isRunning()) {
+        restartPromises.push(controller.executor.setProfile(profileName ?? undefined));
+      }
+    }
+    await Promise.all(restartPromises);
   }
 
   /**

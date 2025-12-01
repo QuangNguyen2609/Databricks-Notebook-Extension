@@ -65,6 +65,7 @@ export class PersistentExecutor implements vscode.Disposable {
   private pythonPath: string;
   private kernelScriptPath: string;
   private workingDirectory: string;
+  private profileName: string | undefined;
   private isReady = false;
   private pendingRequests = new Map<string, {
     resolve: (result: KernelResponse) => void;
@@ -84,11 +85,13 @@ export class PersistentExecutor implements vscode.Disposable {
    * @param pythonPath - Path to the Python executable
    * @param extensionPath - Path to the extension directory (for kernel script)
    * @param workingDirectory - Working directory for code execution
+   * @param profileName - Databricks profile name to use for authentication
    */
-  constructor(pythonPath: string, extensionPath: string, workingDirectory?: string) {
+  constructor(pythonPath: string, extensionPath: string, workingDirectory?: string, profileName?: string) {
     this.pythonPath = pythonPath;
     this.kernelScriptPath = path.join(extensionPath, 'dist', 'python', 'kernel_runner.py');
     this.workingDirectory = workingDirectory || process.cwd();
+    this.profileName = profileName;
   }
 
   /**
@@ -108,9 +111,15 @@ export class PersistentExecutor implements vscode.Disposable {
 
     return new Promise((resolve) => {
       try {
+        // Build environment with optional Databricks profile
+        const env: NodeJS.ProcessEnv = { ...process.env };
+        if (this.profileName) {
+          env.DATABRICKS_CONFIG_PROFILE = this.profileName;
+        }
+
         this.process = cp.spawn(this.pythonPath, [this.kernelScriptPath], {
           cwd: this.workingDirectory,
-          env: { ...process.env },
+          env,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
 
@@ -383,6 +392,20 @@ export class PersistentExecutor implements vscode.Disposable {
   async restart(): Promise<boolean> {
     this.stop();
     return this.start();
+  }
+
+  /**
+   * Set the Databricks profile and restart the kernel if running
+   *
+   * @param profileName - Databricks profile name to use
+   */
+  async setProfile(profileName: string | undefined): Promise<void> {
+    if (this.profileName !== profileName) {
+      this.profileName = profileName;
+      if (this.isRunning()) {
+        await this.restart();
+      }
+    }
   }
 
   /**

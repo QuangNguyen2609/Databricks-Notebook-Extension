@@ -20,37 +20,19 @@ _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
 
 def _get_databricks_profile():
     """
-    Get the Databricks profile to use.
-    Checks environment variables and config file for profile name.
+    Get the Databricks profile to use from environment variable only.
+    No auto-selection - profile must be explicitly set by the extension.
     """
     import os
-    import configparser
 
-    # Check environment variable first
+    # Only use environment variable - extension sets this based on user selection
     profile = os.environ.get('DATABRICKS_CONFIG_PROFILE')
-    if profile:
-        return profile
-
-    # Check if there's a default profile or find the first available
-    config_path = os.path.expanduser('~/.databrickscfg')
-    if os.path.exists(config_path):
-        config = configparser.ConfigParser()
-        config.read(config_path)
-        sections = config.sections()
-
-        # Prefer DEFAULT if it exists
-        if 'DEFAULT' in sections:
-            return 'DEFAULT'
-        # Otherwise use the first profile
-        if sections:
-            return sections[0]
-
-    return None
+    return profile
 
 
 def _get_token_from_cache(host: str) -> str | None:
     """
-    Get token from Databricks CLI token cache.
+    Get token from Databricks CLI token cache with EXACT host matching.
     Used as fallback when profile auth fails (e.g., databricks-cli auth type).
     """
     import os
@@ -64,14 +46,23 @@ def _get_token_from_cache(host: str) -> str | None:
             cache = json.load(f)
 
         tokens = cache.get('tokens', {})
-        host = host.rstrip('/')
 
+        # Normalize host for comparison
+        normalized_host = host.rstrip('/').lower()
+        if not normalized_host.startswith('https://'):
+            normalized_host = f'https://{normalized_host}'
+
+        # EXACT match only - no substring matching or fallback
         for key, token_data in tokens.items():
-            if host in key or key in host:
+            normalized_key = key.rstrip('/').lower()
+            if not normalized_key.startswith('https://'):
+                normalized_key = f'https://{normalized_key}'
+
+            if normalized_key == normalized_host:
                 return token_data.get('access_token')
 
-        if tokens:
-            return list(tokens.values())[0].get('access_token')
+        # No fallback to first token - return None if no exact match
+        return None
     except Exception:
         pass
 
@@ -130,6 +121,8 @@ def _initialize_spark_session():
                     return "OK: Databricks Connect initialized (token cache)"
                 except Exception as e:
                     errors.append(f"Token cache failed: {e}")
+            else:
+                errors.append(f"No token found in cache for host: {host}")
 
     except ImportError as e:
         errors.append(f"Import failed: {e}")

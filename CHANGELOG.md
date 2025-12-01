@@ -5,6 +5,30 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-12-01
+
+### Added
+- **Multi-Profile Authentication Management**
+  - ProfileManager class for reading and managing `~/.databrickscfg` profiles
+  - Status bar indicator showing current Databricks profile (`$(cloud) profile-name`)
+  - Quick Pick selector for easy profile switching with host information displayed
+  - File watcher for automatic profile list refresh when config changes
+  - Auto-restart kernel when profile changes
+  - Workspace-level profile persistence
+  - New command: `databricks-notebook.selectProfile` - Open profile selector
+  - New command: `databricks-notebook.refreshProfiles` - Manually refresh profile list
+
+- **Configuration Options**
+  - `databricks-notebook.defaultProfile` - Default profile to use on startup (leave empty to remember last selection)
+  - `databricks-notebook.showProfileInStatusBar` - Show/hide profile in status bar (default: true)
+
+### Fixed
+- **Exact Token Matching** - Fixed critical issue where wrong OAuth tokens could be used with multiple profiles
+  - Implemented exact host URL matching with normalization (handles trailing slashes, case differences)
+  - Removed fallback to first available token that caused incorrect authentication
+  - Better error messages when token not found for host
+  - Prevents cross-workspace authentication issues
+
 ## [0.1.1] - 2025-12-01
 
 ### Added

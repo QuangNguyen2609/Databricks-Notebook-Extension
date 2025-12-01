@@ -142,7 +142,30 @@ This VS Code extension renders Databricks `.py` notebook files as proper noteboo
 
 ---
 
-### Phase 6: Round-trip Preservation
+### Phase 6: Multi-Profile Authentication
+
+#### ProfileManager (`src/databricks/profileManager.ts`)
+- [x] Parse `~/.databrickscfg` INI format profiles
+- [x] File watcher for config changes
+- [x] Profile selection with workspace state persistence
+- [x] Event emitters for profile and profiles list changes
+- [x] Support for default profile setting
+
+#### Status Bar UI (`src/databricks/statusBar.ts`)
+- [x] Visual indicator showing current profile
+- [x] Click to open profile selector
+- [x] Warning/error states for missing profiles
+- [x] Configurable visibility
+
+#### Profile Integration
+- [x] Pass profile to Python kernel via environment variable
+- [x] Auto-restart kernels on profile change
+- [x] Exact token-to-host matching in Python
+- [x] Profile provider function for controllers
+
+---
+
+### Phase 7: Round-trip Preservation
 
 #### Parser Improvements (`src/parser.ts`)
 - [x] **Bare `# MAGIC` handling**: Lines with `# MAGIC` (no trailing space) correctly render as blank lines in markdown
@@ -172,6 +195,16 @@ This VS Code extension renders Databricks `.py` notebook files as proper noteboo
 - Round-trip parsing preservation
 - Utility functions (`countCells`, `getCellTypes`)
 
+### ProfileManager Tests (17 tests, all passing)
+- Config file parsing (single profile, multiple profiles, comments, whitespace)
+- Profile selection and persistence
+- Event emission (onDidChangeProfile)
+- Profile retrieval (getAllProfiles, hasProfiles)
+- Default profile loading from settings
+- Workspace state restoration
+- Missing profiles handling
+- Malformed config handling
+
 ---
 
 ## Architecture
@@ -182,6 +215,9 @@ src/
 ├── serializer.ts             # NotebookSerializer for VS Code integration
 ├── parser.ts                 # Databricks .py format parser
 ├── types.ts                  # TypeScript interfaces
+├── databricks/
+│   ├── profileManager.ts     # Databricks profile discovery and management
+│   └── statusBar.ts          # Status bar UI for profile display
 ├── kernels/
 │   ├── index.ts              # Kernel module exports
 │   ├── kernelManager.ts      # Manages multiple Python kernel controllers
@@ -194,6 +230,7 @@ src/
 │   └── kernel_runner.py      # Python script for persistent execution
 └── test/
     ├── parser.test.ts        # Comprehensive parser tests
+    ├── profileManager.test.ts # ProfileManager unit tests
     ├── runTest.ts            # Test runner
     └── suite/index.ts        # Test suite configuration
 ```
@@ -266,7 +303,25 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.0.6 (Current)
+### v0.2.0 (Current)
+- **Multi-Profile Authentication Management**: Full UI for selecting and switching between Databricks profiles
+  - ProfileManager class for reading and managing `~/.databrickscfg` profiles
+  - Status bar indicator showing current profile (`$(cloud) profile-name`)
+  - Quick Pick selector for profile switching with host information
+  - File watcher for automatic profile list refresh
+  - Auto-restart kernel when profile changes
+- **Exact Token Matching**: Fixed token-to-host matching to prevent using wrong tokens for multiple profiles
+  - Exact host URL matching with normalization (handles trailing slashes, case differences)
+  - Removed fallback to first available token
+  - Better error messages when token not found for host
+- **Configuration Options**:
+  - `databricks-notebook.defaultProfile`: Default profile to use on startup
+  - `databricks-notebook.showProfileInStatusBar`: Show/hide profile in status bar
+- **New Commands**:
+  - `databricks-notebook.selectProfile`: Open profile selector
+  - `databricks-notebook.refreshProfiles`: Manually refresh profile list
+
+### v0.0.6
 - **Unified Tab Experience for Notebook Button**: Clicking the notebook icon in editor title bar now replaces the text editor tab instead of opening a new tab
 - Applied the same "close-then-open" pattern used in auto-open and notification flows
 - Enhance the python kernel discovery
