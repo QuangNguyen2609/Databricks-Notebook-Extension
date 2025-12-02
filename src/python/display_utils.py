@@ -26,13 +26,13 @@ def display_to_html(*args, display_outputs):
 
 def convert_to_html(obj):
     """Convert various data types to HTML representation."""
-    # Check if it's a Spark DataFrame
-    try:
-        from pyspark.sql import DataFrame as SparkDataFrame
-        if isinstance(obj, SparkDataFrame):
+    # Check if it's a Spark DataFrame (works for both classic PySpark and Spark Connect)
+    # Use duck typing: if it has schema/collect/count, treat it as a Spark DataFrame
+    if hasattr(obj, 'schema') and hasattr(obj, 'collect') and hasattr(obj, 'count'):
+        try:
             return spark_dataframe_to_html(obj)
-    except ImportError:
-        pass
+        except Exception:
+            pass
 
     # Check if it's a Pandas DataFrame
     try:

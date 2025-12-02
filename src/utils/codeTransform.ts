@@ -46,6 +46,9 @@ export function wrapSqlCode(sql: string): string {
   // Escape for Python triple-quoted string
   const escapedSql = escapeForPythonTripleQuote(cleanSql);
 
+  // Use display() which generates rich HTML tables with sorting, column resizing, etc.
+  // display() uses df.collect() (not show()) so it doesn't have JVM stdout issues.
+  // It already limits to 100 rows and shows "Showing X of Y rows" in the footer.
   return `
 if 'spark' not in dir():
     raise NameError("""'spark' is not defined. Initialize it first by running:

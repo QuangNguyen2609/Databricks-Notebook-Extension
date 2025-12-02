@@ -5,6 +5,22 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-12-02
+
+### Added
+- **Extension Icon**: Added Databricks logo icon for VS Code marketplace visibility
+- **Highlight String Code Dependency**: Added `iuyoy.highlight-string-code` extension for SQL syntax highlighting in Python strings
+
+### Fixed
+- **Magic Command Cell Conversion**: Cells with magic commands (SQL, Scala, R, Shell) now correctly convert back to Python when user removes the magic prefix (e.g., deletes `%sql`)
+- **Kernel Startup Race Condition**: Fixed race condition in Python kernel startup where ready signal could be missed
+  - Pause stdout stream before readline setup to prevent data loss
+  - Added `resolveOnce` wrapper to prevent multiple promise resolutions
+  - Increased ready timeout from 10s to 30s for Databricks Connect initialization
+- **OAuth Token Authentication**: Fixed issue where profile's `auth_type=databricks-cli` could override explicit token authentication
+  - Clear `DATABRICKS_CONFIG_PROFILE` env var before token-based auth
+  - Ensures OAuth tokens from cache are used correctly
+
 ## [0.3.0] - 2025-12-01
 
 ### Added
