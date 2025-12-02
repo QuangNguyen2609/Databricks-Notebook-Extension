@@ -128,8 +128,21 @@ export class PersistentExecutor implements vscode.Disposable {
           stdio: ['pipe', 'pipe', 'pipe'],
         });
 
-        // Set up readline for stdout
+        // Track if we've already resolved to prevent multiple resolutions
+        let resolved = false;
+        const resolveOnce = (value: boolean) => {
+          if (!resolved) {
+            resolved = true;
+            resolve(value);
+          }
+        };
+
+        // Set up readline for stdout IMMEDIATELY and synchronously
+        // This must happen before any async operations to avoid missing the ready signal
         if (this.process.stdout) {
+          // Pause the stream to prevent data loss before readline is ready
+          this.process.stdout.pause();
+
           this.readlineInterface = readline.createInterface({
             input: this.process.stdout,
             crlfDelay: Infinity,
@@ -138,6 +151,9 @@ export class PersistentExecutor implements vscode.Disposable {
           this.readlineInterface.on('line', (line) => {
             this.handleOutput(line);
           });
+
+          // Resume the stream now that readline is listening
+          this.process.stdout.resume();
         }
 
         // Handle stderr
@@ -150,7 +166,7 @@ export class PersistentExecutor implements vscode.Disposable {
           console.error('[Python Kernel error]:', error);
           this._onDidChangeState.fire('error');
           this.cleanup();
-          resolve(false);
+          resolveOnce(false);
         });
 
         // Handle process exit
@@ -158,25 +174,30 @@ export class PersistentExecutor implements vscode.Disposable {
           console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
           this._onDidChangeState.fire('stopped');
           this.cleanup();
+          // If process exits before ready, resolve with false
+          if (!this.isReady) {
+            resolveOnce(false);
+          }
         });
 
-        // Wait for ready signal with timeout
+        // Wait for ready signal with longer timeout (30 seconds)
+        // Databricks Connect initialization can be slow on first run
         const readyTimeout = setTimeout(() => {
           if (!this.isReady) {
-            console.error('[Python Kernel] Timeout waiting for ready signal');
+            console.error('[Python Kernel] Timeout waiting for ready signal (30s)');
             this.stop();
-            resolve(false);
+            resolveOnce(false);
           }
-        }, 10000);
+        }, 30000);
 
-        // Check for ready signal
+        // Check for ready signal more frequently
         const checkReady = setInterval(() => {
           if (this.isReady) {
             clearTimeout(readyTimeout);
             clearInterval(checkReady);
-            resolve(true);
+            resolveOnce(true);
           }
-        }, 100);
+        }, 50);
 
       } catch (error) {
         console.error('[Python Kernel] Failed to start:', error);

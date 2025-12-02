@@ -648,6 +648,56 @@ async function removeMagicCommand(
 }
 
 /**
+ * Convert a magic-command language cell back to Python
+ * Called when user removes the magic command from a cell (e.g., deletes %sql from SQL cell)
+ * @param notebook - The notebook document
+ * @param cell - The cell to convert
+ * @param content - The current cell content (without magic command)
+ */
+async function convertToPythonCell(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  content: string
+): Promise<void> {
+  const cellKey = cell.document.uri.toString();
+  const cellIndex = cell.index;
+
+  // Mark as processed to prevent infinite loops
+  autoDetectedCells.add(cellKey);
+
+  const edit = new vscode.WorkspaceEdit();
+
+  const cellData = new vscode.NotebookCellData(
+    vscode.NotebookCellKind.Code,
+    content,
+    'python'
+  );
+
+  cellData.metadata = {
+    ...cell.metadata,
+    databricksType: 'code',
+  };
+
+  edit.set(notebook.uri, [
+    vscode.NotebookEdit.replaceCells(
+      new vscode.NotebookRange(cellIndex, cellIndex + 1),
+      [cellData]
+    )
+  ]);
+
+  const success = await vscode.workspace.applyEdit(edit);
+
+  if (success) {
+    // Restore cursor to the cell and enter edit mode
+    const notebookEditor = vscode.window.activeNotebookEditor;
+    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
+      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
+      vscode.commands.executeCommand('notebook.cell.edit');
+    }
+  }
+}
+
+/**
  * Handle cell content or language changes
  * @param notebook - The notebook document
  * @param change - The cell change event
@@ -669,9 +719,10 @@ function handleCellContentChange(
 
   const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
 
-  // Handle language change TO magic-command language (e.g., user changed language picker to SQL)
+  // Handle magic-command language cells (SQL, Scala, R, Shell) where user removed the magic command
+  // When user deletes the magic command (e.g., %sql), convert the cell back to Python
   if (requiredMagic && !contentStartsWithMagic(content, requiredMagic) && !autoDetectedCells.has(cellKey)) {
-    ensureMagicCommand(notebook, cell, requiredMagic, languageId);
+    convertToPythonCell(notebook, cell, content);
     return;
   }
 

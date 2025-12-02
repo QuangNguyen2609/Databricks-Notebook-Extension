@@ -119,6 +119,7 @@ describe('Code Transform Tests', () => {
     it('should wrap simple SQL', () => {
       const result = wrapSqlCode('SELECT 1');
       assert.ok(result.includes('spark.sql("""SELECT 1""")'));
+      // Uses display() for rich HTML table output
       assert.ok(result.includes('display(_df)'));
     });
 

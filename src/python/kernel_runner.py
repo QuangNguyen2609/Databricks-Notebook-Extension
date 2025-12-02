@@ -126,6 +126,12 @@ def _initialize_spark_session():
             token = _get_token_from_cache(host)
             if token:
                 try:
+                    # IMPORTANT: Clear profile env var before token-based auth
+                    # The SDK reads DATABRICKS_CONFIG_PROFILE and applies profile's auth_type,
+                    # which can override explicit token auth (especially with auth_type=databricks-cli)
+                    if 'DATABRICKS_CONFIG_PROFILE' in os.environ:
+                        del os.environ['DATABRICKS_CONFIG_PROFILE']
+
                     spark = DatabricksSession.builder.host(host).token(token).serverless(True).getOrCreate()
                     _namespace['spark'] = spark
                     _namespace['DatabricksSession'] = DatabricksSession

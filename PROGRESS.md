@@ -360,7 +360,16 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.3.0 (Current)
+### v0.3.1 (Current)
+- **Extension Icon**: Added Databricks logo for VS Code marketplace
+- **SQL Syntax Highlighting**: Added `highlight-string-code` extension dependency for SQL in Python strings
+- **Bug Fixes**:
+  - Magic-command cells (SQL, Scala, R, Shell) now convert back to Python when user removes the magic prefix
+  - Fixed kernel startup race condition where ready signal could be missed
+  - Fixed OAuth token auth being overridden by profile's `auth_type=databricks-cli`
+  - Fixed Spark Connect DataFrame detection using duck typing instead of isinstance
+
+### v0.3.0
 - **Rich DataFrame Display**: Databricks-style `display()` function with minimal dark theme
   - HTML table rendering for Spark and Pandas DataFrames
   - Null value badges, execution time tracking, row count display
