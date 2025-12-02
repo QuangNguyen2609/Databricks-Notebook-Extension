@@ -2,7 +2,7 @@
   "name": "databricks-notebook-viewer",
   "displayName": "Databricks Notebook Viewer",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "databricks-notebook-viewer",
   "icon": "assets/databricks-logo-icon.png",
   "engines": {
@@ -23,8 +23,7 @@
   ],
   "activationEvents": [],
   "extensionDependencies": [
-    "ms-python.python",
-    "iuyoy.highlight-string-code"
+    "ms-python.python"
   ],
   "main": "./dist/extension.js",
   "contributes": {
