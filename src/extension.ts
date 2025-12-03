@@ -519,9 +519,10 @@ async function ensureMagicCommand(
   autoDetectedCells.add(cellKey);
 
   // Build new content with magic command
+  // Always add a newline after the magic command so cursor is on a new line
   const newContent = content.trim()
     ? `${magicCommand}\n${content}`
-    : magicCommand;
+    : `${magicCommand}\n`;
 
   const edit = new vscode.WorkspaceEdit();
 
@@ -550,7 +551,9 @@ async function ensureMagicCommand(
     const notebookEditor = vscode.window.activeNotebookEditor;
     if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
       notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      vscode.commands.executeCommand('notebook.cell.edit');
+      await vscode.commands.executeCommand('notebook.cell.edit');
+      // Move cursor to the end of the cell (after the magic command on a new line)
+      await vscode.commands.executeCommand('cursorBottom');
     }
   }
 }

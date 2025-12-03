@@ -5,6 +5,24 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2025-12-03
+
+### Added
+- **Column Type Icons**: SVG icons displayed in DataFrame table headers indicating data types
+  - Covers all Databricks SQL types: string, integer (bigint/int/smallint/tinyint), decimal/double/float, boolean, date/timestamp/timestamp_ntz/interval, binary, array, map, struct, variant, object, geography, geometry, void
+  - Tooltip shows the specific type name on hover
+  - Support for both Spark and Pandas DataFrames
+
+### Fixed
+- **OAuth Token Auto-Refresh**: Automatically refreshes expired OAuth tokens before they expire
+  - Checks token expiry with 5-minute buffer to prevent mid-session failures
+  - Updates token cache after successful refresh
+  - Windows timezone fix for correct local time comparison
+- **Configurable Kernel Startup Timeout**: New `kernelStartupTimeout` setting (default: 15000ms)
+  - Databricks Connect initialization can take 15-25 seconds on first run
+  - Prevents false timeout errors during initial Spark session creation
+- **Magic Command Cursor Position**: After SQL/Scala/R/Shell auto-detection, cursor now correctly positions on a new line after the magic command for immediate editing
+
 ## [0.3.2] - 2025-12-02
 
 ### Fix
