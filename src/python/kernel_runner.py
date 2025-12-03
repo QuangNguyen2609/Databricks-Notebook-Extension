@@ -15,10 +15,18 @@ import io
 import traceback
 import signal
 import os
-import configparser
 
 # Display utilities
 from display_utils import display_to_html
+
+# Databricks authentication utilities
+from databricks_utils import (
+    log_debug,
+    get_databricks_profile,
+    get_token_from_cache,
+    get_host_from_profile,
+    get_auth_type_from_profile,
+)
 
 # Persistent namespace for variable storage across cells
 _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
@@ -35,95 +43,54 @@ def display(*args):
     display_to_html(*args, display_outputs=_display_outputs)
 
 
-def _get_databricks_profile():
-    """
-    Get the Databricks profile to use from environment variable only.
-    No auto-selection - profile must be explicitly set by the extension.
-    """
-    # Only use environment variable - extension sets this based on user selection
-    profile = os.environ.get('DATABRICKS_CONFIG_PROFILE')
-    return profile
-
-
-def _get_token_from_cache(host: str) -> str | None:
-    """
-    Get token from Databricks CLI token cache with EXACT host matching.
-    Used as fallback when profile auth fails (e.g., databricks-cli auth type).
-    """
-    cache_path = os.path.expanduser('~/.databricks/token-cache.json')
-    if not os.path.exists(cache_path):
-        return None
-
-    try:
-        with open(cache_path, 'r') as f:
-            cache = json.load(f)
-
-        tokens = cache.get('tokens', {})
-
-        # Normalize host for comparison
-        normalized_host = host.rstrip('/').lower()
-        if not normalized_host.startswith('https://'):
-            normalized_host = f'https://{normalized_host}'
-
-        # EXACT match only - no substring matching or fallback
-        for key, token_data in tokens.items():
-            normalized_key = key.rstrip('/').lower()
-            if not normalized_key.startswith('https://'):
-                normalized_key = f'https://{normalized_key}'
-
-            if normalized_key == normalized_host:
-                return token_data.get('access_token')
-
-        # No fallback to first token - return None if no exact match
-        return None
-    except Exception:
-        pass
-
-    return None
-
-
-def _initialize_spark_session():
+def initialize_spark_session():
     """
     Initialize Databricks Connect SparkSession with serverless compute.
     """
     errors = []
 
-    profile = _get_databricks_profile()
+    profile = get_databricks_profile()
+    log_debug(f"Profile from env: {profile}")
+    log_debug(f"Home directory: {os.path.expanduser('~')}")
+    log_debug(f"Platform: {os.name}")
 
-    # Read host from config
+    # Read host and auth_type from profile config
     host = os.environ.get('DATABRICKS_HOST')
-    if not host and profile:
-        config_path = os.path.expanduser('~/.databrickscfg')
-        if os.path.exists(config_path):
-            config = configparser.ConfigParser()
-            config.read(config_path)
-            if config.has_option(profile, 'host'):
-                host = config.get(profile, 'host')
+    auth_type = None
+
+    if profile:
+        if not host:
+            host = get_host_from_profile(profile)
+            log_debug(f"Host from profile: {host}")
+        auth_type = get_auth_type_from_profile(profile)
+        log_debug(f"Auth type from profile: {auth_type}")
 
     try:
         from databricks.connect import DatabricksSession
 
-        # Method 1: SPARK_REMOTE env var (Databricks extension sets this)
-        spark_remote = os.environ.get('SPARK_REMOTE')
-        if spark_remote:
-            spark = DatabricksSession.builder.remote(spark_remote).getOrCreate()
-            _namespace['spark'] = spark
-            _namespace['DatabricksSession'] = DatabricksSession
-            return "OK: Databricks Connect initialized (SPARK_REMOTE)"
-
-        # Method 2: Profile + serverless
-        if profile:
+        # Method 1: Profile + serverless (skip if auth_type=databricks-cli, it needs token from cache)
+        if profile and auth_type != 'databricks-cli':
+            log_debug(f"Attempting profile auth with profile: {profile}")
             try:
                 spark = DatabricksSession.builder.profile(profile).serverless(True).getOrCreate()
                 _namespace['spark'] = spark
                 _namespace['DatabricksSession'] = DatabricksSession
+                log_debug("Profile auth succeeded!")
                 return f"OK: Databricks Connect initialized (profile: {profile})"
             except Exception as e:
+                log_debug(f"Profile auth failed: {e}")
+                log_debug(f"Full traceback:\n{traceback.format_exc()}")
                 errors.append(f"Profile failed: {e}")
+        elif auth_type == 'databricks-cli':
+            log_debug("Profile uses databricks-cli auth, will use token cache directly")
+        else:
+            log_debug("No profile set, skipping profile auth")
 
-        # Method 3: Token from CLI cache + serverless (fallback for databricks-cli auth)
+        # Method 2: Token from CLI cache + serverless (for databricks-cli auth type)
+        log_debug(f"Host for token cache lookup: {host}")
         if host:
-            token = _get_token_from_cache(host)
+            token = get_token_from_cache(host)
+            log_debug(f"Token from cache: {'found' if token else 'not found'}")
             if token:
                 try:
                     # IMPORTANT: Clear profile env var before token-based auth
@@ -240,7 +207,7 @@ def reset_namespace():
     _namespace['display'] = display
 
     # Re-initialize spark session after reset
-    spark_status = _initialize_spark_session()
+    spark_status = initialize_spark_session()
     return {'success': True, 'message': f'Namespace reset. {spark_status}'}
 
 
@@ -276,7 +243,7 @@ def main():
     _namespace['display'] = display
 
     # Initialize Spark session if available
-    spark_status = _initialize_spark_session()
+    spark_status = initialize_spark_session()
 
     # Send ready signal with spark status
     print(json.dumps({

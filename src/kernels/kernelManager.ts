@@ -198,14 +198,22 @@ export class KernelManager implements vscode.Disposable {
       );
     }
 
-    // Restart all active executors with new profile
-    const restartPromises: Promise<void>[] = [];
+    // Update all executors with new profile (both running and non-running)
+    const updatePromises: Promise<void>[] = [];
     for (const controller of this.controllers.values()) {
-      if (controller.executor?.isRunning()) {
-        restartPromises.push(controller.executor.setProfile(profileName ?? undefined));
+      if (controller.executor) {
+        if (controller.executor.isRunning()) {
+          // For running executors, use setProfile which will restart with new profile
+          updatePromises.push(controller.executor.setProfile(profileName ?? undefined));
+        } else {
+          // For non-running executors, dispose and clear so they'll be recreated
+          // with the new profile on next execution
+          controller.executor.dispose();
+          controller.executor = null;
+        }
       }
     }
-    await Promise.all(restartPromises);
+    await Promise.all(updatePromises);
   }
 
   /**
