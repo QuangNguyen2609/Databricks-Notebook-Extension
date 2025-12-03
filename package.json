@@ -2,7 +2,7 @@
   "name": "databricks-notebook-viewer",
   "displayName": "Databricks Notebook Viewer",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "databricks-notebook-viewer",
   "icon": "assets/databricks-logo-icon.png",
   "engines": {
@@ -120,8 +120,13 @@
         },
         "databricks-notebook.pythonExecutionTimeout": {
           "type": "number",
-          "default": 60000,
+          "default": 100000,
           "description": "Timeout for Python cell execution in milliseconds"
+        },
+        "databricks-notebook.kernelStartupTimeout": {
+          "type": "number",
+          "default": 15000,
+          "description": "Timeout for kernel startup in milliseconds. Databricks Connect initialization can take 15-25 seconds on first run."
         },
         "databricks-notebook.enableScrollableOutput": {
           "type": "boolean",

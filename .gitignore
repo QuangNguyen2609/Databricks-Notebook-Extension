@@ -29,6 +29,7 @@ Thumbs.db
 *.swo
 *~
 *.pyc
+.vscode/
 
 # Environment files
 .env

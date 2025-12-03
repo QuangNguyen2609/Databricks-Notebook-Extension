@@ -3,6 +3,199 @@ Display utilities for rendering DataFrames and data structures as HTML.
 Mimics Databricks display() functionality.
 """
 
+# SVG icons for data types (inline, 14x14 viewBox)
+# Covers all Databricks SQL types
+TYPE_ICONS = {
+    # String/Text
+    'string': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="2" y="11" font-size="10" font-weight="600" font-family="monospace">A</text><text x="7" y="12" font-size="6" font-family="monospace">b</text></svg>''',
+
+    # Integer types (BIGINT, INT, SMALLINT, TINYINT)
+    'integer': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="1" y="11" font-size="9" font-weight="600" font-family="monospace">123</text></svg>''',
+
+    # Floating point (DOUBLE, FLOAT, DECIMAL)
+    'decimal': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="0" y="11" font-size="8" font-weight="600" font-family="monospace">1.2</text></svg>''',
+
+    # Boolean
+    'boolean': '''<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="10" height="10" rx="2"/><path d="M4 7l2 2 4-4"/></svg>''',
+
+    # All time-related types use the same neutral calendar icon (no color)
+    # Covers: DATE, TIMESTAMP, TIMESTAMP_NTZ, INTERVAL
+    'calendar': '''<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="2" width="12" height="11" rx="1"/><path d="M1 5h12"/><path d="M4 1v2M10 1v2"/></svg>''',
+
+    # Binary
+    'binary': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="0" y="11" font-size="7" font-weight="600" font-family="monospace">0x</text></svg>''',
+
+    # Array
+    'array': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="1" y="11" font-size="11" font-weight="600" font-family="monospace">[]</text></svg>''',
+
+    # Map
+    'map': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="-1" y="11" font-size="8" font-weight="600" font-family="monospace">k:v</text></svg>''',
+
+    # Struct
+    'struct': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="1" y="11" font-size="11" font-weight="600" font-family="monospace">{}</text></svg>''',
+
+    # Variant (semi-structured)
+    'variant': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="1" y="11" font-size="9" font-weight="600" font-family="monospace">&lt;/&gt;</text></svg>''',
+
+    # Object (structured variant)
+    'object': '''<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="2" width="10" height="10" rx="1"/><path d="M5 5h4M5 7h4M5 9h2"/></svg>''',
+
+    # Void/Null
+    'void': '''<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5"/><path d="M3 11L11 3"/></svg>''',
+
+    # Geography (globe)
+    'geography': '''<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="5.5"/><ellipse cx="7" cy="7" rx="2.5" ry="5.5"/><path d="M1.5 7h11"/></svg>''',
+
+    # Geometry (shapes)
+    'geometry': '''<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><polygon points="7,1 13,10 1,10"/><circle cx="10" cy="11" r="2"/></svg>''',
+
+    # Unknown/fallback
+    'unknown': '''<svg viewBox="0 0 14 14" fill="currentColor"><text x="4" y="11" font-size="11" font-weight="600" font-family="monospace">?</text></svg>'''
+}
+
+
+def get_spark_type_info(data_type):
+    """Map Spark/Databricks data types to SVG icons and display names.
+
+    Handles all Databricks SQL types:
+    - Integer: BIGINT, INT, SMALLINT, TINYINT
+    - Decimal: DECIMAL(p,s), DOUBLE, FLOAT
+    - String: STRING
+    - Binary: BINARY
+    - Boolean: BOOLEAN
+    - Date/Time: DATE, TIMESTAMP, TIMESTAMP_NTZ, INTERVAL
+    - Complex: ARRAY, MAP, STRUCT, VARIANT, OBJECT
+    - Spatial: GEOGRAPHY, GEOMETRY
+    - Special: VOID
+    """
+    type_str = str(data_type).lower()
+
+    # String
+    if 'string' in type_str:
+        return (TYPE_ICONS['string'], 'string')
+
+    # Integer types (check specific names to avoid false matches)
+    if any(t in type_str for t in ['bigint', 'int', 'smallint', 'tinyint', 'long', 'short', 'byte']):
+        # Determine specific type name for tooltip
+        if 'bigint' in type_str or 'long' in type_str:
+            return (TYPE_ICONS['integer'], 'bigint')
+        elif 'smallint' in type_str or 'short' in type_str:
+            return (TYPE_ICONS['integer'], 'smallint')
+        elif 'tinyint' in type_str or 'byte' in type_str:
+            return (TYPE_ICONS['integer'], 'tinyint')
+        else:
+            return (TYPE_ICONS['integer'], 'int')
+
+    # Decimal/Float types
+    if 'decimal' in type_str:
+        return (TYPE_ICONS['decimal'], 'decimal')
+    if 'double' in type_str:
+        return (TYPE_ICONS['decimal'], 'double')
+    if 'float' in type_str:
+        return (TYPE_ICONS['decimal'], 'float')
+
+    # Boolean
+    if 'boolean' in type_str or 'bool' in type_str:
+        return (TYPE_ICONS['boolean'], 'boolean')
+
+    # Date/Time types - all use the same calendar icon
+    if 'timestamp_ntz' in type_str:
+        return (TYPE_ICONS['calendar'], 'timestamp_ntz')
+    if 'timestamp' in type_str:
+        return (TYPE_ICONS['calendar'], 'timestamp')
+    if 'date' in type_str:
+        return (TYPE_ICONS['calendar'], 'date')
+    if 'interval' in type_str:
+        return (TYPE_ICONS['calendar'], 'interval')
+
+    # Binary
+    if 'binary' in type_str:
+        return (TYPE_ICONS['binary'], 'binary')
+
+    # Complex types
+    if 'array' in type_str:
+        return (TYPE_ICONS['array'], 'array')
+    if 'map' in type_str:
+        return (TYPE_ICONS['map'], 'map')
+    if 'struct' in type_str:
+        return (TYPE_ICONS['struct'], 'struct')
+    if 'variant' in type_str:
+        return (TYPE_ICONS['variant'], 'variant')
+    if 'object' in type_str:
+        return (TYPE_ICONS['object'], 'object')
+
+    # Spatial types
+    if 'geography' in type_str:
+        return (TYPE_ICONS['geography'], 'geography')
+    if 'geometry' in type_str:
+        return (TYPE_ICONS['geometry'], 'geometry')
+
+    # Void/Null
+    if 'void' in type_str or 'null' in type_str:
+        return (TYPE_ICONS['void'], 'void')
+
+    # Unknown fallback
+    return (TYPE_ICONS['unknown'], type_str)
+
+
+def get_pandas_type_info(dtype):
+    """Map Pandas dtypes to SVG icons and display names."""
+    dtype_str = str(dtype).lower()
+
+    if 'object' in dtype_str or 'string' in dtype_str:
+        return (TYPE_ICONS['string'], 'string')
+    elif 'int64' in dtype_str:
+        return (TYPE_ICONS['integer'], 'bigint')
+    elif 'int32' in dtype_str:
+        return (TYPE_ICONS['integer'], 'int')
+    elif 'int16' in dtype_str:
+        return (TYPE_ICONS['integer'], 'smallint')
+    elif 'int8' in dtype_str:
+        return (TYPE_ICONS['integer'], 'tinyint')
+    elif 'int' in dtype_str:
+        return (TYPE_ICONS['integer'], 'int')
+    elif 'float' in dtype_str:
+        return (TYPE_ICONS['decimal'], 'double')
+    elif 'bool' in dtype_str:
+        return (TYPE_ICONS['boolean'], 'boolean')
+    elif 'datetime' in dtype_str or 'timestamp' in dtype_str:
+        return (TYPE_ICONS['calendar'], 'timestamp')
+    elif 'timedelta' in dtype_str:
+        return (TYPE_ICONS['calendar'], 'interval')
+    elif 'category' in dtype_str:
+        return (TYPE_ICONS['array'], 'category')
+    else:
+        return (TYPE_ICONS['unknown'], dtype_str)
+
+
+def html_escape(text):
+    """Escape HTML special characters."""
+    return (str(text)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&#39;'))
+
+
+def render_cell_value(value, is_string_type=False):
+    """Render cell value with collapsible support for long strings.
+
+    Collapsing is dynamic based on column width (handled by JS).
+    String cells with length > 20 get the collapsible wrapper; JS determines visibility.
+    """
+    if value is None:
+        return '<span class="null-badge">null</span>'
+
+    display_value = str(value)
+    escaped_value = html_escape(display_value)
+
+    # For string types, wrap in collapsible container (JS handles expand/collapse)
+    if is_string_type and len(display_value) > 20:
+        return f'''<div class="collapsible-cell collapsed" data-full-length="{len(display_value)}"><span class="collapse-toggle">›</span><span class="cell-content">{escaped_value}</span></div>'''
+
+    return escaped_value
+
 
 def display_to_html(*args, display_outputs):
     """
@@ -64,6 +257,9 @@ def spark_dataframe_to_html(df, limit=100, execution_time=None):
         schema = df.schema
         columns = [field.name for field in schema.fields]
 
+        # Create type map for efficient lookup
+        type_map = {field.name: str(field.dataType).lower() for field in schema.fields}
+
         # Collect data (limit rows for performance)
         rows = df.limit(limit).collect()
         row_count = df.count()
@@ -77,13 +273,15 @@ def spark_dataframe_to_html(df, limit=100, execution_time=None):
 
         # Add table wrapper
         html += '<div class="dataframe-table-wrapper">'
-        html += '<table class="dataframe-table">'
+        html += f'<table class="dataframe-table" data-col-count="{len(columns)}">'
 
-        # Header with sort indicators and resize handles
+        # Header with type icons, sort indicators and resize handles
         html += '<thead><tr>'
-        for i, col in enumerate(columns):
+        for i, field in enumerate(schema.fields):
+            icon_svg, type_name = get_spark_type_info(field.dataType)
             html += f'<th data-col-index="{i}">'
-            html += f'<span class="th-content">{col}</span>'
+            html += f'<span class="type-icon" data-type="{type_name}">{icon_svg}</span>'
+            html += f'<span class="th-content">{field.name}</span>'
             html += '<span class="sort-indicator"></span>'
             html += '<span class="resize-handle"></span>'
             html += '</th>'
@@ -95,12 +293,9 @@ def spark_dataframe_to_html(df, limit=100, execution_time=None):
             html += '<tr>'
             for col in columns:
                 value = row[col]
-                # Handle None/null values with badge styling
-                if value is None:
-                    html += '<td><span class="null-badge">null</span></td>'
-                else:
-                    display_value = str(value)
-                    html += f'<td>{display_value}</td>'
+                is_string = 'string' in type_map.get(col, '')
+                cell_html = render_cell_value(value, is_string)
+                html += f'<td>{cell_html}</td>'
             html += '</tr>'
         html += '</tbody>'
 
@@ -137,6 +332,10 @@ def pandas_dataframe_to_html(df, limit=100, execution_time=None):
 
         limited_df = df.head(limit)
         row_count = len(df)
+        columns = list(limited_df.columns)
+
+        # Create type map for efficient lookup
+        type_map = {col: str(limited_df[col].dtype).lower() for col in columns}
 
         # Calculate runtime if not provided
         if execution_time is None:
@@ -145,12 +344,14 @@ def pandas_dataframe_to_html(df, limit=100, execution_time=None):
         # Build HTML manually for consistent styling
         html = _get_html_table_start()
         html += '<div class="dataframe-table-wrapper">'
-        html += '<table class="dataframe-table">'
+        html += f'<table class="dataframe-table" data-col-count="{len(columns)}">'
 
-        # Header with sort indicators and resize handles
+        # Header with type icons, sort indicators and resize handles
         html += '<thead><tr>'
-        for i, col in enumerate(limited_df.columns):
+        for i, col in enumerate(columns):
+            icon_svg, type_name = get_pandas_type_info(limited_df[col].dtype)
             html += f'<th data-col-index="{i}">'
+            html += f'<span class="type-icon" data-type="{type_name}">{icon_svg}</span>'
             html += f'<span class="th-content">{col}</span>'
             html += '<span class="sort-indicator"></span>'
             html += '<span class="resize-handle"></span>'
@@ -161,11 +362,15 @@ def pandas_dataframe_to_html(df, limit=100, execution_time=None):
         html += '<tbody>'
         for _, row in limited_df.iterrows():
             html += '<tr>'
-            for val in row:
-                if val is None or (isinstance(val, float) and val != val):  # Check for NaN
+            for col in columns:
+                val = row[col]
+                # Check for NaN
+                if val is None or (isinstance(val, float) and val != val):
                     html += '<td><span class="null-badge">null</span></td>'
                 else:
-                    html += f'<td>{val}</td>'
+                    is_string = 'object' in type_map.get(col, '') or 'string' in type_map.get(col, '')
+                    cell_html = render_cell_value(val, is_string)
+                    html += f'<td>{cell_html}</td>'
             html += '</tr>'
         html += '</tbody>'
 
@@ -249,6 +454,7 @@ def _get_html_table_start(include_style=True):
         }
         .dataframe-table {
             border-collapse: collapse;
+            table-layout: fixed;
             width: 100%;
             font-size: 13px;
             background-color: #1e1e1e;
@@ -257,7 +463,7 @@ def _get_html_table_start(include_style=True):
             background-color: #252526;
             color: #cccccc;
             font-weight: 500;
-            padding: 10px 16px;
+            padding: 10px 12px;
             text-align: left;
             position: sticky;
             top: 0;
@@ -266,12 +472,13 @@ def _get_html_table_start(include_style=True):
             border-right: 1px solid #3a3a3a;
             font-size: 12px;
             text-transform: none;
+            width: var(--col-width, 150px);
             min-width: 100px;
-            overflow: hidden;
+            max-width: var(--col-width, 150px);
+            overflow: visible;
             white-space: nowrap;
             cursor: pointer;
             user-select: none;
-            position: relative;
         }
         .dataframe-table th:hover {
             background-color: #2d2d2d;
@@ -279,12 +486,60 @@ def _get_html_table_start(include_style=True):
         .dataframe-table th:last-child {
             border-right: none;
         }
+        /* Type icon styling */
+        .dataframe-table th .type-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+            color: #808080;
+            flex-shrink: 0;
+            cursor: help;
+            vertical-align: middle;
+            position: relative;
+        }
+        .dataframe-table th .type-icon svg {
+            width: 14px;
+            height: 14px;
+            pointer-events: none;
+        }
+        .dataframe-table th .type-icon:hover {
+            color: #cccccc;
+        }
+        /* Custom tooltip for type icon - appears below */
+        .dataframe-table th .type-icon::after {
+            content: attr(data-type);
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #3a3a3a;
+            color: #e0e0e0;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s ease;
+            z-index: 1000;
+            pointer-events: none;
+            margin-top: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .dataframe-table th .type-icon:hover::after {
+            opacity: 1;
+            visibility: visible;
+        }
         .dataframe-table th .th-content {
             display: inline-block;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: calc(100% - 40px);
+            max-width: calc(100% - 60px);
+            vertical-align: middle;
         }
         .dataframe-table th .sort-indicator {
             display: inline-block;
@@ -326,12 +581,16 @@ def _get_html_table_start(include_style=True):
         .dataframe-table td {
             border-bottom: 1px solid #2d2d2d;
             border-right: 1px solid #2d2d2d;
-            padding: 8px 16px;
+            padding: 8px 12px;
             color: #d4d4d4;
             background-color: #1e1e1e;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            text-align: left;
+            width: var(--col-width, 150px);
+            min-width: 100px;
+            max-width: var(--col-width, 150px);
         }
         .dataframe-table td:last-child {
             border-right: none;
@@ -347,6 +606,53 @@ def _get_html_table_start(include_style=True):
             color: #808080;
             font-size: 11px;
             font-weight: 500;
+        }
+        /* Collapsible cell styling */
+        .collapsible-cell {
+            display: flex;
+            align-items: flex-start;
+            text-align: left;
+            width: 100%;
+        }
+        .collapsible-cell .collapse-toggle {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            margin-right: 4px;
+            cursor: pointer;
+            color: #808080;
+            font-size: 12px;
+            flex-shrink: 0;
+            transition: transform 0.15s ease;
+            user-select: none;
+        }
+        .collapsible-cell.needs-collapse .collapse-toggle {
+            display: inline-flex;
+        }
+        .collapsible-cell .collapse-toggle:hover {
+            color: #cccccc;
+        }
+        .collapsible-cell .cell-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .collapsible-cell.collapsed .cell-content {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .collapsible-cell.expanded .collapse-toggle {
+            transform: rotate(90deg);
+        }
+        .collapsible-cell.expanded .cell-content {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .dataframe-table td:has(.collapsible-cell.expanded) {
+            white-space: normal;
+            overflow: visible;
         }
         .dataframe-footer {
             display: flex;
@@ -510,35 +816,70 @@ def _get_html_table_start(include_style=True):
             const table = document.querySelector('.dataframe-table');
             if (!table) return;
 
-            // Add tooltips and double-click expansion to all cells
+            const wrapper = table.closest('.dataframe-table-wrapper');
+            const headers = table.querySelectorAll('thead th');
+            const colCount = headers.length;
+
+            // Calculate equal width based on container (equal distribution)
+            const containerWidth = wrapper ? wrapper.offsetWidth : 800;
+            const colWidth = Math.max(120, Math.floor(containerWidth / colCount));
+
+            // Set CSS variable for column width
+            table.style.setProperty('--col-width', colWidth + 'px');
+
+            // Detect which cells need collapse toggle based on actual rendered width
+            function updateCollapsibleCells() {
+                const collapsibleCells = table.querySelectorAll('.collapsible-cell');
+                collapsibleCells.forEach(cell => {
+                    const content = cell.querySelector('.cell-content');
+                    const td = cell.closest('td');
+                    if (!td || !content) return;
+                    const availableWidth = td.offsetWidth - 30;
+
+                    // Check if content overflows
+                    if (content.scrollWidth > availableWidth) {
+                        cell.classList.add('needs-collapse');
+                    } else {
+                        cell.classList.remove('needs-collapse');
+                    }
+                });
+            }
+
+            // Initial check after render
+            setTimeout(updateCollapsibleCells, 50);
+
+            // Setup collapsible toggle click handlers
+            table.addEventListener('click', function(e) {
+                const toggle = e.target.closest('.collapse-toggle');
+                if (toggle) {
+                    e.stopPropagation();
+                    const cell = toggle.closest('.collapsible-cell');
+                    if (cell) {
+                        cell.classList.toggle('collapsed');
+                        cell.classList.toggle('expanded');
+                    }
+                }
+            });
+
+            // Add tooltips to all cells
             const cells = document.querySelectorAll('.dataframe-table td');
             cells.forEach(cell => {
                 // Add tooltip with full content on hover
-                cell.title = cell.textContent.trim();
-
-                // Double-click to toggle text wrapping
-                cell.addEventListener('dblclick', function() {
-                    if (this.style.whiteSpace === 'normal') {
-                        this.style.whiteSpace = 'nowrap';
-                        this.style.maxWidth = '400px';
-                    } else {
-                        this.style.whiteSpace = 'normal';
-                        this.style.maxWidth = 'none';
-                    }
-                });
+                const content = cell.querySelector('.cell-content');
+                cell.title = content ? content.textContent.trim() : cell.textContent.trim();
             });
 
             // Setup column sorting and resizing
-            const headers = table.querySelectorAll('thead th');
             const sortStates = new Map(); // Track sort state per column
 
             headers.forEach((header, index) => {
                 sortStates.set(index, 'none');
 
-                // Click on header (but not resize handle) to sort
+                // Click on header (but not resize handle or type icon) to sort
                 header.addEventListener('click', function(e) {
-                    // Don't sort if clicking on resize handle
-                    if (e.target.classList.contains('resize-handle')) {
+                    // Don't sort if clicking on resize handle or type icon
+                    if (e.target.classList.contains('resize-handle') ||
+                        e.target.closest('.type-icon')) {
                         return;
                     }
 
@@ -595,6 +936,8 @@ def _get_html_table_start(include_style=True):
                         const onMouseUp = function() {
                             document.removeEventListener('mousemove', onMouseMove);
                             document.removeEventListener('mouseup', onMouseUp);
+                            // Update collapsible cells after resize
+                            updateCollapsibleCells();
                         };
 
                         document.addEventListener('mousemove', onMouseMove);
