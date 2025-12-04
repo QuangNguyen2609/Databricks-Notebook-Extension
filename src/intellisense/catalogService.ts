@@ -5,10 +5,25 @@
  * via the Python kernel. Implements lazy loading with in-memory caching.
  *
  * Cache is cleared only on kernel restart - no repeated queries during a session.
+ *
+ * IMPORTANT: Results are only cached when the executor is available and running.
+ * Failed queries due to executor not being ready are NOT cached, allowing retry
+ * on subsequent requests once the executor is available.
  */
 
 import { PersistentExecutor } from '../kernels/persistentExecutor';
 import { CatalogInfo, SchemaInfo, TableInfo, ColumnInfo } from './types';
+
+/**
+ * Result from executing code, distinguishing between "executor not available"
+ * and "query executed but returned null/empty"
+ */
+interface ExecuteResult {
+  /** Whether the executor was available and query was attempted */
+  executed: boolean;
+  /** The result data (null if query failed or returned no data) */
+  data: unknown;
+}
 
 /**
  * Service for fetching and caching Databricks catalog metadata
@@ -34,7 +49,16 @@ export class CatalogService {
   constructor(private getExecutor: () => PersistentExecutor | null) {}
 
   /**
+   * Check if the executor is available and running
+   */
+  private isExecutorAvailable(): boolean {
+    const executor = this.getExecutor();
+    return executor !== null && executor.isRunning();
+  }
+
+  /**
    * Get the default catalog (fetched once per session)
+   * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getDefaultCatalog(): Promise<string | null> {
     if (this.defaultCatalogFetched) {
@@ -51,9 +75,13 @@ export class CatalogService {
     this.pendingRequests.set(key, promise);
 
     try {
-      this.defaultCatalog = await promise;
-      this.defaultCatalogFetched = true;
-      return this.defaultCatalog;
+      const result = await promise;
+      // Only cache if executor was available (query was actually attempted)
+      if (result.executed) {
+        this.defaultCatalog = result.data as string | null;
+        this.defaultCatalogFetched = true;
+      }
+      return result.data as string | null;
     } finally {
       this.pendingRequests.delete(key);
     }
@@ -61,6 +89,7 @@ export class CatalogService {
 
   /**
    * Get the default schema/database (fetched once per session)
+   * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getDefaultSchema(): Promise<string | null> {
     if (this.defaultSchemaFetched) {
@@ -77,9 +106,13 @@ export class CatalogService {
     this.pendingRequests.set(key, promise);
 
     try {
-      this.defaultSchema = await promise;
-      this.defaultSchemaFetched = true;
-      return this.defaultSchema;
+      const result = await promise;
+      // Only cache if executor was available (query was actually attempted)
+      if (result.executed) {
+        this.defaultSchema = result.data as string | null;
+        this.defaultSchemaFetched = true;
+      }
+      return result.data as string | null;
     } finally {
       this.pendingRequests.delete(key);
     }
@@ -87,6 +120,7 @@ export class CatalogService {
 
   /**
    * Get all catalogs (fetched once per session)
+   * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getCatalogs(): Promise<CatalogInfo[]> {
     if (this.catalogCache !== null) {
@@ -103,8 +137,12 @@ export class CatalogService {
     this.pendingRequests.set(key, promise);
 
     try {
-      this.catalogCache = await promise;
-      return this.catalogCache;
+      const result = await promise;
+      // Only cache if executor was available (query was actually attempted)
+      if (result.executed) {
+        this.catalogCache = result.data as CatalogInfo[];
+      }
+      return (result.data as CatalogInfo[]) || [];
     } finally {
       this.pendingRequests.delete(key);
     }
@@ -112,6 +150,7 @@ export class CatalogService {
 
   /**
    * Get schemas in a catalog (fetched once per catalog per session)
+   * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getSchemas(catalogName: string): Promise<SchemaInfo[]> {
     const cached = this.schemaCache.get(catalogName);
@@ -129,8 +168,12 @@ export class CatalogService {
     this.pendingRequests.set(key, promise);
 
     try {
-      const schemas = await promise;
-      this.schemaCache.set(catalogName, schemas);
+      const result = await promise;
+      const schemas = (result.data as SchemaInfo[]) || [];
+      // Only cache if executor was available (query was actually attempted)
+      if (result.executed) {
+        this.schemaCache.set(catalogName, schemas);
+      }
       return schemas;
     } finally {
       this.pendingRequests.delete(key);
@@ -139,6 +182,7 @@ export class CatalogService {
 
   /**
    * Get tables in a schema (fetched once per catalog.schema per session)
+   * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getTables(catalogName: string, schemaName: string): Promise<TableInfo[]> {
     const cacheKey = `${catalogName}.${schemaName}`;
@@ -157,8 +201,12 @@ export class CatalogService {
     this.pendingRequests.set(key, promise);
 
     try {
-      const tables = await promise;
-      this.tableCache.set(cacheKey, tables);
+      const result = await promise;
+      const tables = (result.data as TableInfo[]) || [];
+      // Only cache if executor was available (query was actually attempted)
+      if (result.executed) {
+        this.tableCache.set(cacheKey, tables);
+      }
       return tables;
     } finally {
       this.pendingRequests.delete(key);
@@ -167,6 +215,7 @@ export class CatalogService {
 
   /**
    * Get columns in a table (fetched once per catalog.schema.table per session)
+   * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getColumns(
     catalogName: string,
@@ -189,8 +238,12 @@ export class CatalogService {
     this.pendingRequests.set(key, promise);
 
     try {
-      const columns = await promise;
-      this.columnCache.set(cacheKey, columns);
+      const result = await promise;
+      const columns = (result.data as ColumnInfo[]) || [];
+      // Only cache if executor was available (query was actually attempted)
+      if (result.executed) {
+        this.columnCache.set(cacheKey, columns);
+      }
       return columns;
     } finally {
       this.pendingRequests.delete(key);
@@ -236,7 +289,7 @@ export class CatalogService {
 
   // ========== Private fetch methods ==========
 
-  private async fetchDefaultCatalog(): Promise<string | null> {
+  private async fetchDefaultCatalog(): Promise<ExecuteResult> {
     const code = `
 import json
 try:
@@ -245,14 +298,18 @@ try:
 except Exception as e:
     print(json.dumps({"error": str(e)}))
 `;
-    const result = await this.executeCode(code) as { defaultCatalog?: string } | null;
-    if (result && result.defaultCatalog) {
-      return result.defaultCatalog;
+    const execResult = await this.executeCode(code);
+    if (!execResult.executed) {
+      return { executed: false, data: null };
     }
-    return null;
+    const result = execResult.data as { defaultCatalog?: string } | null;
+    if (result && result.defaultCatalog) {
+      return { executed: true, data: result.defaultCatalog };
+    }
+    return { executed: true, data: null };
   }
 
-  private async fetchDefaultSchema(): Promise<string | null> {
+  private async fetchDefaultSchema(): Promise<ExecuteResult> {
     const code = `
 import json
 try:
@@ -261,14 +318,18 @@ try:
 except Exception as e:
     print(json.dumps({"error": str(e)}))
 `;
-    const result = await this.executeCode(code) as { defaultSchema?: string } | null;
-    if (result && result.defaultSchema) {
-      return result.defaultSchema;
+    const execResult = await this.executeCode(code);
+    if (!execResult.executed) {
+      return { executed: false, data: null };
     }
-    return null;
+    const result = execResult.data as { defaultSchema?: string } | null;
+    if (result && result.defaultSchema) {
+      return { executed: true, data: result.defaultSchema };
+    }
+    return { executed: true, data: null };
   }
 
-  private async fetchCatalogs(): Promise<CatalogInfo[]> {
+  private async fetchCatalogs(): Promise<ExecuteResult> {
     const code = `
 import json
 try:
@@ -278,14 +339,17 @@ try:
 except Exception as e:
     print(json.dumps([]))
 `;
-    const result = await this.executeCode(code);
-    if (Array.isArray(result)) {
-      return result as CatalogInfo[];
+    const execResult = await this.executeCode(code);
+    if (!execResult.executed) {
+      return { executed: false, data: [] };
     }
-    return [];
+    if (Array.isArray(execResult.data)) {
+      return { executed: true, data: execResult.data as CatalogInfo[] };
+    }
+    return { executed: true, data: [] };
   }
 
-  private async fetchSchemas(catalogName: string): Promise<SchemaInfo[]> {
+  private async fetchSchemas(catalogName: string): Promise<ExecuteResult> {
     const escapedCatalog = this.escapeIdentifier(catalogName);
     const code = `
 import json
@@ -296,14 +360,17 @@ try:
 except Exception as e:
     print(json.dumps([]))
 `;
-    const result = await this.executeCode(code);
-    if (Array.isArray(result)) {
-      return result as SchemaInfo[];
+    const execResult = await this.executeCode(code);
+    if (!execResult.executed) {
+      return { executed: false, data: [] };
     }
-    return [];
+    if (Array.isArray(execResult.data)) {
+      return { executed: true, data: execResult.data as SchemaInfo[] };
+    }
+    return { executed: true, data: [] };
   }
 
-  private async fetchTables(catalogName: string, schemaName: string): Promise<TableInfo[]> {
+  private async fetchTables(catalogName: string, schemaName: string): Promise<ExecuteResult> {
     const escapedCatalog = this.escapeIdentifier(catalogName);
     const escapedSchema = this.escapeIdentifier(schemaName);
     const code = `
@@ -315,18 +382,21 @@ try:
 except Exception as e:
     print(json.dumps([]))
 `;
-    const result = await this.executeCode(code);
-    if (Array.isArray(result)) {
-      return result as TableInfo[];
+    const execResult = await this.executeCode(code);
+    if (!execResult.executed) {
+      return { executed: false, data: [] };
     }
-    return [];
+    if (Array.isArray(execResult.data)) {
+      return { executed: true, data: execResult.data as TableInfo[] };
+    }
+    return { executed: true, data: [] };
   }
 
   private async fetchColumns(
     catalogName: string,
     schemaName: string,
     tableName: string
-  ): Promise<ColumnInfo[]> {
+  ): Promise<ExecuteResult> {
     const escapedCatalog = this.escapeIdentifier(catalogName);
     const escapedSchema = this.escapeIdentifier(schemaName);
     const escapedTable = this.escapeIdentifier(tableName);
@@ -339,21 +409,25 @@ try:
 except Exception as e:
     print(json.dumps([]))
 `;
-    const result = await this.executeCode(code);
-    if (Array.isArray(result)) {
-      return result as ColumnInfo[];
+    const execResult = await this.executeCode(code);
+    if (!execResult.executed) {
+      return { executed: false, data: [] };
     }
-    return [];
+    if (Array.isArray(execResult.data)) {
+      return { executed: true, data: execResult.data as ColumnInfo[] };
+    }
+    return { executed: true, data: [] };
   }
 
   /**
    * Execute Python code and parse JSON result from stdout
+   * Returns ExecuteResult indicating whether executor was available
    */
-  private async executeCode(code: string): Promise<unknown> {
+  private async executeCode(code: string): Promise<ExecuteResult> {
     const executor = this.getExecutor();
     if (!executor || !executor.isRunning()) {
-      console.log('[CatalogService] Executor not available');
-      return null;
+      console.log('[CatalogService] Executor not available - query not executed, will retry on next request');
+      return { executed: false, data: null };
     }
 
     try {
@@ -365,17 +439,17 @@ except Exception as e:
           const line = lines[i].trim();
           if (line.startsWith('{') || line.startsWith('[')) {
             try {
-              return JSON.parse(line);
+              return { executed: true, data: JSON.parse(line) };
             } catch {
               continue;
             }
           }
         }
       }
-      return null;
+      return { executed: true, data: null };
     } catch (error) {
       console.error('[CatalogService] Execution error:', error);
-      return null;
+      return { executed: true, data: null };
     }
   }
 

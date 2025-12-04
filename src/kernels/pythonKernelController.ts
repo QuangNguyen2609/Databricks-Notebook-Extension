@@ -65,8 +65,11 @@ export class PythonKernelController implements vscode.Disposable {
       this.controller.onDidChangeSelectedNotebooks((event) => {
         if (event.selected) {
           console.debug(`[Kernel] Controller selected for: ${event.notebook.uri.toString()}`);
-          // Initialize executor on kernel selection so intellisense works before first cell execution
-          this.ensureExecutor(event.notebook);
+          // Initialize and start executor on kernel selection so intellisense works before first cell execution
+          // Fire and forget - don't block kernel selection UI
+          this.ensureExecutor(event.notebook).catch((err) => {
+            console.error(`[Kernel] Failed to start executor for intellisense:`, err);
+          });
         }
       })
     );
@@ -344,9 +347,11 @@ export class PythonKernelController implements vscode.Disposable {
   }
 
   /**
-   * Ensure executor is initialized (used for intellisense before first cell execution)
+   * Ensure executor is initialized and started (used for intellisense before first cell execution)
+   * This method creates the executor if needed and starts the Python process so that
+   * IntelliSense queries can be executed immediately after kernel selection.
    */
-  ensureExecutor(notebook: vscode.NotebookDocument): void {
+  async ensureExecutor(notebook: vscode.NotebookDocument): Promise<void> {
     if (!this.executor) {
       const profileName = this.profileProvider?.();
       console.debug(`[Kernel] Creating executor for intellisense: ${this.environment.path}, profile: ${profileName || 'none'}`);
@@ -356,6 +361,17 @@ export class PythonKernelController implements vscode.Disposable {
         this.getWorkingDirectory(notebook),
         profileName
       );
+    }
+
+    // Actually start the executor so IntelliSense works before first cell execution
+    if (!this.executor.isRunning()) {
+      console.debug(`[Kernel] Starting executor for intellisense...`);
+      const started = await this.executor.start();
+      if (started) {
+        console.debug(`[Kernel] Executor started successfully for intellisense`);
+      } else {
+        console.warn(`[Kernel] Failed to start executor for intellisense`);
+      }
     }
   }
 
