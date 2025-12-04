@@ -327,6 +327,26 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ---
 
+### Phase 9: IntelliSense Reliability
+
+#### Executor Auto-Start (`src/kernels/pythonKernelController.ts`)
+- [x] **Automatic executor initialization**: `ensureExecutor()` now starts the Python process immediately when kernel is selected
+- [x] **Fire-and-forget startup**: Executor starts in background without blocking kernel selection UI
+- [x] **IntelliSense ready on kernel select**: Users can use SQL autocomplete immediately after selecting a kernel, without running a cell first
+
+#### CatalogService Caching Fix (`src/intellisense/catalogService.ts`)
+- [x] **ExecuteResult type**: New type distinguishes "not executed" (executor unavailable) from "executed but empty"
+- [x] **Smart caching**: Only caches results when executor was available and query actually executed
+- [x] **Automatic retry**: Failed queries due to unavailable executor are not cached, allowing retry on next request
+- [x] **isExecutorAvailable() helper**: Quick check before attempting queries
+
+#### Root Causes Fixed
+- [x] **Bug 1**: `ensureExecutor()` created executor object but never called `start()`
+- [x] **Bug 2**: `CatalogService` cached `null`/`[]` results even when queries failed due to executor not being ready
+- [x] **Result**: IntelliSense now works reliably regardless of when user starts typing
+
+---
+
 ## Known Limitations
 
 1. **Brief flash on auto-open**: The text editor briefly appears before being replaced. This is unavoidable because VS Code's `onDidOpenTextDocument` fires after the editor opens.
@@ -360,14 +380,25 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.3.1 (Current)
+### v0.3.4 (Current)
+- **IntelliSense Reliability Fix**: Fixed critical issues causing SQL autocomplete to work inconsistently
+  - Executor now auto-starts when kernel is selected (no need to run a cell first)
+  - Failed metadata queries are no longer cached, allowing automatic retry
+  - IntelliSense works immediately after kernel selection
+
+### v0.3.3
+- **Column Type Icons**: SVG icons in DataFrame headers showing data types
+- **OAuth Token Auto-Refresh**: Automatically refreshes expired OAuth tokens
+- **Configurable Kernel Startup Timeout**: New `kernelStartupTimeout` setting
+- **Magic Command Cursor Position**: Cursor correctly positions after auto-detection
+
+### v0.3.2
+- Removed `iuyoy.highlight-string-code` from extension dependencies for Cursor compatibility
+
+### v0.3.1
 - **Extension Icon**: Added Databricks logo for VS Code marketplace
 - **SQL Syntax Highlighting**: Added `highlight-string-code` extension dependency for SQL in Python strings
-- **Bug Fixes**:
-  - Magic-command cells (SQL, Scala, R, Shell) now convert back to Python when user removes the magic prefix
-  - Fixed kernel startup race condition where ready signal could be missed
-  - Fixed OAuth token auth being overridden by profile's `auth_type=databricks-cli`
-  - Fixed Spark Connect DataFrame detection using duck typing instead of isinstance
+- **Bug Fixes**: Magic-command cell conversion, kernel startup race condition, OAuth token auth fix
 
 ### v0.3.0
 - **Rich DataFrame Display**: Databricks-style `display()` function with minimal dark theme

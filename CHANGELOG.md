@@ -5,6 +5,14 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2025-12-04
+
+### Fixed
+- **SQL IntelliSense Reliability**: Fixed critical issues causing IntelliSense to work inconsistently
+  - **Executor Auto-Start**: Kernel executor now automatically starts when a kernel is selected, enabling IntelliSense to work immediately without requiring manual cell execution first
+  - **Caching Bug Fix**: Failed metadata queries (when executor wasn't ready) are no longer cached, allowing automatic retry once the executor becomes available
+  - Previously, if IntelliSense was triggered before the kernel was ready, empty results would be cached permanently until kernel restart
+
 ## [0.3.3] - 2025-12-03
 
 ### Added
