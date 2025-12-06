@@ -82,6 +82,11 @@ interface MockContext {
 describe('ProfileManager', () => {
   let testConfigPath: string;
 
+  // Restore original require after all tests to avoid affecting other test files
+  after(() => {
+    Module.prototype.require = originalRequire;
+  });
+
   // Mock extension context
   const mockContext: MockContext = {
     subscriptions: [],

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { showErrorMessage } from '../utils/notifications';
 
 export interface DatabricksProfile {
   name: string;
@@ -93,7 +94,7 @@ export class ProfileManager implements vscode.Disposable {
         return;
       }
       console.error('Failed to load Databricks profiles:', error);
-      vscode.window.showErrorMessage(`Failed to load Databricks profiles: ${error}`);
+      showErrorMessage(`Failed to load Databricks profiles: ${error}`);
     }
   }
 
@@ -162,7 +163,7 @@ export class ProfileManager implements vscode.Disposable {
 
   async selectProfile(profileName: string): Promise<void> {
     if (!this._profiles.has(profileName)) {
-      vscode.window.showErrorMessage(`Profile "${profileName}" not found`);
+      showErrorMessage(`Profile "${profileName}" not found`);
       return;
     }
 

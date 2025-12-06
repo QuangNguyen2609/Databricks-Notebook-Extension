@@ -7,6 +7,7 @@
 
 import * as vscode from 'vscode';
 import * as readline from 'readline';
+import { showInfoMessage, showWarningMessage } from '../utils/notifications';
 
 /**
  * Virtual environment info from Python kernel
@@ -169,15 +170,15 @@ export function showKernelStatusNotifications(statusInfo: KernelStatusInfo): voi
   // Notify about virtual environment
   if (statusInfo.venvInfo?.is_venv) {
     const venvName = statusInfo.venvInfo.venv_name || 'venv';
-    vscode.window.showInformationMessage(`Kernel: Using virtual environment "${venvName}"`);
+    showInfoMessage(`Kernel: Using virtual environment "${venvName}"`);
   }
 
   // Notify about spark status
   if (statusInfo.sparkStatus) {
     if (statusInfo.sparkStatus.startsWith('OK:')) {
-      vscode.window.showInformationMessage(`Kernel: ${statusInfo.sparkStatus}`);
+      showInfoMessage(`Kernel: ${statusInfo.sparkStatus}`);
     } else if (statusInfo.sparkStatus.startsWith('WARN:')) {
-      vscode.window.showWarningMessage(`Kernel: ${statusInfo.sparkStatus}`);
+      showWarningMessage(`Kernel: ${statusInfo.sparkStatus}`);
     }
   }
 }

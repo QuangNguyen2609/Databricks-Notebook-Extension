@@ -59,6 +59,13 @@ export class PythonKernelController implements vscode.Disposable {
     this._controller.detail = _environment.path;
     this._controller.executeHandler = this.executeHandler.bind(this);
 
+    // Add interruptHandler for VS Code interrupt button integration
+    // This enables the interrupt button in the notebook toolbar during cell execution
+    this._controller.interruptHandler = async (notebook: vscode.NotebookDocument) => {
+      console.debug(`[Kernel] Interrupt requested for: ${notebook.uri.toString()}`);
+      await this.interruptExecution();
+    };
+
     this._outputHandler = new OutputHandler();
 
     // Track when this controller is selected and initialize executor
@@ -215,12 +222,24 @@ export class PythonKernelController implements vscode.Disposable {
       const result = await this._executor.execute(executableCode);
       this._isExecuting = false;
 
+      // Check if interrupted (KeyboardInterrupt)
+      if (result.errorType === 'KeyboardInterrupt') {
+        execution.replaceOutput([
+          new vscode.NotebookCellOutput([
+            vscode.NotebookCellOutputItem.text('Execution interrupted')
+          ])
+        ]);
+        execution.end(undefined, Date.now()); // undefined = interrupted
+        return;
+      }
+
       // Convert result to notebook outputs
       const outputs = this._outputHandler.convertResult(result);
       execution.replaceOutput(outputs);
 
       execution.end(result.success, Date.now());
     } catch (error) {
+      this._isExecuting = false;
       execution.replaceOutput([
         new vscode.NotebookCellOutput([
           vscode.NotebookCellOutputItem.error(new Error(extractErrorMessage(error)))
@@ -305,11 +324,40 @@ export class PythonKernelController implements vscode.Disposable {
   }
 
   /**
-   * Interrupt current execution
+   * Interrupt current execution (synchronous version for backwards compatibility)
    */
   interrupt(): void {
-    if (this._executor && this._isExecuting) {
+    if (this._executor) {
       this._executor.interrupt();
+    }
+  }
+
+  /**
+   * Interrupt the current execution - called by VS Code interruptHandler.
+   * This async version waits for execution to actually stop with a timeout.
+   */
+  private async interruptExecution(): Promise<void> {
+    if (!this._executor) {
+      return;
+    }
+
+    // Send SIGINT to Python process
+    this._executor.interrupt();
+
+    // If we were executing, wait for execution to actually stop (with timeout)
+    if (this._isExecuting) {
+      const timeout = 5000; // 5 seconds max
+      const startTime = Date.now();
+
+      while (this._isExecuting && (Date.now() - startTime) < timeout) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Force end execution if still running
+      if (this._isExecuting) {
+        this._isExecuting = false;
+        console.warn('[Kernel] Interrupt timeout - execution state force-cleared');
+      }
     }
   }
 

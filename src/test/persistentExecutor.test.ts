@@ -11,13 +11,37 @@
 import * as assert from 'assert';
 import { EventEmitter } from 'events';
 
+// Mock stream that extends EventEmitter with pause/resume methods (required by readline.createInterface)
+class MockStream extends EventEmitter {
+  private _paused = false;
+
+  pause(): this {
+    this._paused = true;
+    return this;
+  }
+
+  resume(): this {
+    this._paused = false;
+    return this;
+  }
+
+  isPaused(): boolean {
+    return this._paused;
+  }
+
+  // Provide a setEncoding method for readline compatibility
+  setEncoding(_encoding: string): this {
+    return this;
+  }
+}
+
 // Mock child process
 class MockChildProcess extends EventEmitter {
   stdin = {
     write: (_data: string) => true,
   };
-  stdout = new EventEmitter();
-  stderr = new EventEmitter();
+  stdout = new MockStream();
+  stderr = new MockStream();
   killed = false;
   pid = 12345;
 

@@ -169,6 +169,10 @@ const mockVscode = {
     showWarningMessage: () => Promise.resolve(undefined),
     showInformationMessage: () => Promise.resolve(undefined),
     activeNotebookEditor: null as { notebook: { uri: { toString: () => string } } } | null,
+    withProgress: <T>(_options: unknown, task: () => T | Promise<T>) => {
+      // Just run the task without showing progress
+      return Promise.resolve(task());
+    },
   },
   commands: {
     registerCommand: (_id: string, _handler: () => void) => ({ dispose: () => {} }),
@@ -180,10 +184,33 @@ const mockVscode = {
       };
     }
   },
+  ProgressLocation: {
+    Notification: 15,
+    SourceControl: 1,
+    Window: 10,
+  },
 };
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import Module from 'module';
+
+// Clear module cache to ensure fresh mocking works when running with other tests
+// This is necessary because mocha runs all tests in the same process
+const modulesToClear = [
+  '../kernels/kernelManager',
+  '../kernels/pythonKernelController',
+  '../utils/pythonExtensionApi',
+];
+modulesToClear.forEach(mod => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const resolved = require.resolve(mod);
+    delete require.cache[resolved];
+  } catch {
+    // Module not in cache yet, ignore
+  }
+});
+
 const originalRequire = Module.prototype.require;
 
 // Track created controllers
@@ -222,6 +249,11 @@ import { KernelManager } from '../kernels/kernelManager';
 
 describe('KernelManager Tests', () => {
   let mockProfileManager: MockProfileManager;
+
+  // Restore original require after all tests to avoid affecting other test files
+  after(() => {
+    Module.prototype.require = originalRequire;
+  });
 
   beforeEach(() => {
     mockPythonApi = new MockPythonExtensionApi();

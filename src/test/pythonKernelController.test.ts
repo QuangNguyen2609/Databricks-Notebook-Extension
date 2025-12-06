@@ -160,6 +160,25 @@ const mockVscode = {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import Module from 'module';
+
+// Clear module cache to ensure fresh mocking works when running with other tests
+// This is necessary because mocha runs all tests in the same process
+const modulesToClear = [
+  '../kernels/pythonKernelController',
+  '../kernels/persistentExecutor',
+  '../utils/outputHandler',
+  '../utils/codeTransform',
+];
+modulesToClear.forEach(mod => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const resolved = require.resolve(mod);
+    delete require.cache[resolved];
+  } catch {
+    // Module not in cache yet, ignore
+  }
+});
+
 const originalRequire = Module.prototype.require;
 Module.prototype.require = function(id: string) {
   if (id === 'vscode') {
@@ -201,6 +220,11 @@ describe('PythonKernelController Tests', () => {
     version: '3.11.0',
     envType: 'system',
   };
+
+  // Restore original require after all tests to avoid affecting other test files
+  after(() => {
+    Module.prototype.require = originalRequire;
+  });
 
   beforeEach(() => {
     createdController = null;

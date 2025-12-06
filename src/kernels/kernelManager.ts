@@ -10,6 +10,7 @@ import { PythonExtensionApi, PythonEnvironment } from '../utils/pythonExtensionA
 import { PythonKernelController } from './pythonKernelController';
 import { PersistentExecutor } from './persistentExecutor';
 import { ProfileManager } from '../databricks/profileManager';
+import { showInfoMessage, showWarningMessage, showErrorMessage } from '../utils/notifications';
 
 /**
  * Manages all Python kernel controllers for the Databricks notebook type
@@ -65,9 +66,7 @@ export class KernelManager implements vscode.Disposable {
 
     if (!pythonAvailable) {
       console.warn('[KernelManager] Python extension not available');
-      vscode.window.showWarningMessage(
-        'Python extension is required for kernel execution. Please install the Python extension.'
-      );
+      showWarningMessage('Python extension is required for kernel execution. Please install the Python extension.');
       return;
     }
 
@@ -206,9 +205,7 @@ export class KernelManager implements vscode.Disposable {
   private async onProfileChanged(profileName: string | null): Promise<void> {
     // Notify user
     if (profileName) {
-      vscode.window.showInformationMessage(
-        `Switching to Databricks profile "${profileName}". Restarting active kernels...`
-      );
+      showInfoMessage(`Switching to Databricks profile "${profileName}". Restarting active kernels...`);
     }
 
     // Update all executors with new profile (both running and non-running)
@@ -227,9 +224,7 @@ export class KernelManager implements vscode.Disposable {
     const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failures.length > 0) {
       console.error('[KernelManager] Some kernel restarts failed:', failures.map(f => f.reason));
-      vscode.window.showWarningMessage(
-        `${failures.length} kernel(s) failed to restart after profile change`
-      );
+      showWarningMessage(`${failures.length} kernel(s) failed to restart after profile change`);
     }
   }
 
@@ -282,7 +277,7 @@ export class KernelManager implements vscode.Disposable {
       vscode.commands.registerCommand('databricks-notebook.restartKernel', async () => {
         const notebook = vscode.window.activeNotebookEditor?.notebook;
         if (!notebook) {
-          vscode.window.showWarningMessage('No notebook is currently active');
+          showWarningMessage('No notebook is currently active');
           return;
         }
 
@@ -291,17 +286,20 @@ export class KernelManager implements vscode.Disposable {
         // that match this notebook type
         for (const controller of this._controllers.values()) {
           if (controller.isRunning()) {
+            showInfoMessage('Restarting kernel...');
             const restarted = await controller.restart();
             if (restarted) {
               // Call the restart callback (e.g., to clear catalog cache)
               onKernelRestart?.();
-              vscode.window.showInformationMessage('Kernel restarted successfully');
+              showInfoMessage('Kernel restarted successfully');
+            } else {
+              showErrorMessage('Failed to restart kernel');
             }
             return;
           }
         }
 
-        vscode.window.showInformationMessage('No running kernel to restart');
+        showInfoMessage('No running kernel to restart');
       })
     );
 

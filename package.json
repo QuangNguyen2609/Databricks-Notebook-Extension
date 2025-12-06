@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "databricks-notebook-studio",
@@ -110,6 +110,18 @@
           "when": "resourceExtname == .py",
           "group": "navigation"
         }
+      ],
+      "notebook/toolbar": [
+        {
+          "command": "databricks-notebook.restartKernel",
+          "when": "notebookType == 'databricks-notebook'",
+          "group": "navigation/execute@1"
+        },
+        {
+          "command": "databricks-notebook.interruptKernel",
+          "when": "notebookType == 'databricks-notebook' && notebookCellExecuting",
+          "group": "navigation/execute@2"
+        }
       ]
     },
     "configuration": {
@@ -164,6 +176,21 @@
           "type": "number",
           "default": 500,
           "description": "Debounce delay for linting updates in milliseconds"
+        },
+        "databricks-notebook.intellisense.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable IntelliSense for spark, dbutils, and DataFrame methods"
+        },
+        "databricks-notebook.intellisense.sparkLiveCompletions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Query kernel for live spark completions (slower but more accurate). When disabled, no spark completions are provided."
+        },
+        "databricks-notebook.intellisense.dataFrameCompletions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable live variable completions by querying the kernel for methods and properties of any variable."
         }
       },
       "configurationDefaults": {
@@ -180,7 +207,7 @@
     "lint": "eslint src --ext ts --max-warnings 50",
     "lint:fix": "eslint src --ext ts --fix",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "tsc --declaration false --declarationMap false && mocha 'out/test/{parser,profileManager,codeTransform,constants,serializer,persistentExecutor,kernelManager,pythonKernelController,requestCache,outputHandler,tabManager,catalogService,cellOperations,notebookDiagnosticProvider}.test.js'",
+    "test:unit": "tsc --declaration false --declarationMap false && mocha 'out/test/{parser,profileManager,codeTransform,constants,serializer,requestCache,catalogService,tabManager,cellOperations,notebookDiagnosticProvider,persistentExecutor,kernelManager,pythonKernelController,kernelControls,pythonCompletion,linting}.test.js'",
     "test:coverage": "nyc --reporter=lcov --reporter=text npm run test:unit",
     "ci": "npm run type-check && npm run lint && npm run test:unit && npm run compile"
   },
