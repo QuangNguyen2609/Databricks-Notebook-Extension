@@ -21,6 +21,12 @@ import {
   SQL_KEYWORDS_REGEX,
   contentStartsWithMagic,
 } from './constants';
+import {
+  modifyCell,
+  addMagicToContent,
+  removeMagicFromContent,
+  CellTransformResult,
+} from './utils/cellEditor';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
@@ -492,55 +498,28 @@ async function ensureMagicCommand(
   magicCommand: string,
   languageId: string
 ): Promise<void> {
-  const content = cell.document.getText();
   const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
 
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
+  await modifyCell(notebook, cell, (c): CellTransformResult => {
+    const content = c.document.getText();
+    // Clear disableSqlAutoDetect flag if present (user is manually converting back)
+    const metadata = { ...(c.metadata || {}) } as Record<string, unknown>;
+    delete metadata.disableSqlAutoDetect;
 
-  // Build new content with magic command
-  // Always add a newline after the magic command so cursor is on a new line
-  const newContent = content.trim()
-    ? `${magicCommand}\n${content}`
-    : `${magicCommand}\n`;
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    newContent,
-    languageId
-  );
-
-  // Clear disableSqlAutoDetect flag if present (user is manually converting back)
-  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
-  delete metadata.disableSqlAutoDetect;
-
-  cellData.metadata = {
-    ...metadata,
-    databricksType: MAGIC_TO_CELL_TYPE[magicCommand] || 'code',
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-      // Move cursor to the end of the cell (after the magic command on a new line)
-      await vscode.commands.executeCommand('cursorBottom');
-    }
-  }
+    return {
+      content: addMagicToContent(content, magicCommand),
+      languageId,
+      metadata: {
+        ...metadata,
+        databricksType: MAGIC_TO_CELL_TYPE[magicCommand] || 'code',
+      },
+    };
+  }, {
+    enterEditMode: true,
+    moveCursorToEnd: true,
+    trackingKey: cellKey,
+    trackingSet: autoDetectedCells,
+  });
 }
 
 /**
@@ -584,55 +563,24 @@ async function removeMagicCommand(
   magicCommand: string,
   languageId: string
 ): Promise<void> {
-  const content = cell.document.getText();
   const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
 
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
+  await modifyCell(notebook, cell, (c): CellTransformResult => {
+    const content = c.document.getText();
 
-  // Remove the magic command from content
-  // Handle both "%sql\n..." and "%sql" (just the command)
-  let newContent = content;
-  if (content.trim() === magicCommand) {
-    newContent = '';
-  } else if (content.startsWith(magicCommand + '\n')) {
-    newContent = content.substring(magicCommand.length + 1);
-  } else if (content.startsWith(magicCommand)) {
-    // Handle case where there's content directly after magic (e.g., "%sqlSELECT")
-    newContent = content.substring(magicCommand.length).trimStart();
-  }
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    newContent,
-    languageId
-  );
-
-  cellData.metadata = {
-    ...cell.metadata,
-    databricksType: 'code', // Reset to Python/code type
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
+    return {
+      content: removeMagicFromContent(content, magicCommand),
+      languageId,
+      metadata: {
+        ...c.metadata,
+        databricksType: 'code', // Reset to Python/code type
+      },
+    };
+  }, {
+    enterEditMode: true,
+    trackingKey: cellKey,
+    trackingSet: autoDetectedCells,
+  });
 }
 
 /**
@@ -650,45 +598,26 @@ async function convertCellToLanguage(
   magicCommand: string
 ): Promise<void> {
   const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
-  const content = cell.document.getText();
 
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
+  await modifyCell(notebook, cell, (c): CellTransformResult => {
+    const content = c.document.getText();
+    // Clear disableSqlAutoDetect flag and set appropriate databricksType
+    const metadata = { ...(c.metadata || {}) } as Record<string, unknown>;
+    delete metadata.disableSqlAutoDetect;
 
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    content,
-    languageId
-  );
-
-  // Clear disableSqlAutoDetect flag and set appropriate databricksType
-  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
-  delete metadata.disableSqlAutoDetect;
-  cellData.metadata = {
-    ...metadata,
-    databricksType: MAGIC_TO_CELL_TYPE[magicCommand] || 'code',
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
+    return {
+      content,
+      languageId,
+      metadata: {
+        ...metadata,
+        databricksType: MAGIC_TO_CELL_TYPE[magicCommand] || 'code',
+      },
+    };
+  }, {
+    enterEditMode: true,
+    trackingKey: cellKey,
+    trackingSet: autoDetectedCells,
+  });
 }
 
 /**
@@ -704,46 +633,26 @@ async function convertToPythonCell(
   content: string
 ): Promise<void> {
   const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
 
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    content,
-    'python'
-  );
-
-  // Set disableSqlAutoDetect flag to prevent SQL auto-detection from re-adding %sql
-  // when user types. This flag persists across cell replacements (unlike autoDetectedCells
-  // Set which tracks by URI that changes on replacement). The flag is cleared when content
-  // no longer contains SQL keywords, allowing auto-detect to work again for fresh SQL.
-  cellData.metadata = {
-    ...cell.metadata,
-    databricksType: 'code',
-    disableSqlAutoDetect: true,
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
+  await modifyCell(notebook, cell, (c): CellTransformResult => {
+    // Set disableSqlAutoDetect flag to prevent SQL auto-detection from re-adding %sql
+    // when user types. This flag persists across cell replacements (unlike autoDetectedCells
+    // Set which tracks by URI that changes on replacement). The flag is cleared when content
+    // no longer contains SQL keywords, allowing auto-detect to work again for fresh SQL.
+    return {
+      content,
+      languageId: 'python',
+      metadata: {
+        ...c.metadata,
+        databricksType: 'code',
+        disableSqlAutoDetect: true,
+      },
+    };
+  }, {
+    enterEditMode: true,
+    trackingKey: cellKey,
+    trackingSet: autoDetectedCells,
+  });
 }
 
 /**
@@ -756,40 +665,22 @@ async function clearDisableSqlAutoDetectFlag(
   notebook: vscode.NotebookDocument,
   cell: vscode.NotebookCell
 ): Promise<void> {
-  const cellIndex = cell.index;
-  const content = cell.document.getText();
-  const languageId = cell.document.languageId;
+  await modifyCell(notebook, cell, (c): CellTransformResult => {
+    const content = c.document.getText();
+    const languageId = c.document.languageId;
 
-  const edit = new vscode.WorkspaceEdit();
+    // Copy metadata but remove the disableSqlAutoDetect flag
+    const metadata = { ...(c.metadata || {}) } as Record<string, unknown>;
+    delete metadata.disableSqlAutoDetect;
 
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    content,
-    languageId
-  );
-
-  // Copy metadata but remove the disableSqlAutoDetect flag
-  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
-  delete metadata.disableSqlAutoDetect;
-  cellData.metadata = metadata;
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
+    return {
+      content,
+      languageId,
+      metadata,
+    };
+  }, {
+    enterEditMode: true,
+  });
 }
 
 /**
