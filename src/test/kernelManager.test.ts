@@ -100,7 +100,7 @@ class MockPythonExtensionApi {
 // Mock PythonKernelController
 class MockPythonKernelController {
   private env: typeof mockEnvironments[0];
-  public executor: { isRunning: () => boolean; setProfile: (p?: string) => Promise<void>; dispose: () => void } | null = null;
+  private _executor: { isRunning: () => boolean; setProfile: (p?: string) => Promise<void>; dispose: () => void } | null = null;
   private running = false;
 
   constructor(env: typeof mockEnvironments[0]) {
@@ -117,6 +117,25 @@ class MockPythonKernelController {
 
   setRunning(running: boolean) {
     this.running = running;
+  }
+
+  getExecutor() {
+    return this._executor;
+  }
+
+  clearExecutor() {
+    if (this._executor) {
+      this._executor.dispose();
+      this._executor = null;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async setExecutorProfile(_profileName?: string) {
+    // Default implementation - can be overridden in tests
+    if (this._executor) {
+      await this._executor.setProfile(_profileName);
+    }
   }
 
   async restart() {
@@ -423,21 +442,17 @@ describe('KernelManager Tests', () => {
       const manager = new KernelManager('/path/to/extension', mockProfileManager as never);
       await manager.initialize();
 
-      // Simulate a running kernel with executor
+      // Simulate a running kernel
       const controller = mockControllers.get(mockEnvironments[0].id);
       if (controller) {
         controller.setRunning(true);
-        controller.executor = {
-          isRunning: () => true,
-          setProfile: async () => {},
-          dispose: () => {},
-        };
       }
 
-      let setProfileCalled = false;
-      if (controller?.executor) {
-        controller.executor.setProfile = async () => {
-          setProfileCalled = true;
+      // Track if setExecutorProfile was called via the controller's method
+      let setExecutorProfileCalled = false;
+      if (controller) {
+        controller.setExecutorProfile = async () => {
+          setExecutorProfileCalled = true;
         };
       }
 
@@ -447,7 +462,7 @@ describe('KernelManager Tests', () => {
       // Give time for async handlers
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      assert.strictEqual(setProfileCalled, true);
+      assert.strictEqual(setExecutorProfileCalled, true);
       manager.dispose();
     });
   });

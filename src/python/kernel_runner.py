@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Persistent Python kernel runner for Databricks Notebook Viewer.
+Persistent Python kernel runner for Databricks Notebook Studio.
 Receives code via stdin (JSON), executes in persistent namespace,
 returns results via stdout (JSON).
 

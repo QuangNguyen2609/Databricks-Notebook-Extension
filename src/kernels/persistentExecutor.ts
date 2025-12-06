@@ -9,6 +9,27 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
 import * as readline from 'readline';
+import { extractErrorMessage } from '../utils/errorHandler';
+import {
+  KERNEL_STARTUP_TIMEOUT_MS,
+  EXECUTION_TIMEOUT_MS,
+  SHORT_OPERATION_TIMEOUT_MS,
+  READY_CHECK_INTERVAL_MS,
+} from '../constants';
+import {
+  VenvInfo,
+  ReadyResponse,
+  buildKernelEnvironment,
+  isDebugModeEnabled,
+  setupReadlineInterface,
+  shouldLogStderr,
+  createSingleUseResolver,
+  extractKernelStatusInfo,
+  showKernelStatusNotifications,
+  logKernelStatusDebug,
+  createReadyWaiter,
+  getKernelStartupTimeout,
+} from './utils';
 
 /**
  * Result from executing Python code
@@ -39,17 +60,7 @@ interface KernelRequest {
   code?: string;
 }
 
-/**
- * Virtual environment info from Python kernel
- */
-interface VenvInfo {
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  is_venv: boolean;
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  venv_path: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention
-  venv_name: string | null;
-}
+// VenvInfo is imported from ./utils
 
 /**
  * Response from the Python kernel
@@ -77,15 +88,6 @@ interface KernelResponse {
   databricks_connect_compatible?: boolean;
 }
 
-/** Last spark status from kernel initialization */
-let lastSparkStatus: string | undefined;
-
-/** Last venv info from kernel initialization */
-let lastVenvInfo: VenvInfo | undefined;
-
-/** Last databricks-connect version from kernel initialization */
-let lastDbConnectVersion: string | undefined;
-
 /**
  * Manages a persistent Python process for code execution
  */
@@ -104,6 +106,15 @@ export class PersistentExecutor implements vscode.Disposable {
   }>();
   private _requestCounter = 0;
   private _readlineInterface: readline.Interface | null = null;
+
+  /** Spark status from kernel initialization (instance-specific) */
+  private _sparkStatus: string | undefined;
+
+  /** Virtual environment info from kernel initialization (instance-specific) */
+  private _venvInfo: VenvInfo | undefined;
+
+  /** Databricks-connect version from kernel initialization (instance-specific) */
+  private _dbConnectVersion: string | undefined;
 
   /** Event emitter for process lifecycle events */
   private _onDidChangeState = new vscode.EventEmitter<'starting' | 'ready' | 'stopped' | 'error'>();
@@ -133,126 +144,116 @@ export class PersistentExecutor implements vscode.Disposable {
     }
 
     this._onDidChangeState.fire('starting');
-
-    // Check if debug mode is enabled via environment variable (developer-only)
-    // Set DATABRICKS_KERNEL_DEBUG=true to enable verbose logging
-    this._debugMode = process.env.DATABRICKS_KERNEL_DEBUG === 'true';
+    this._debugMode = isDebugModeEnabled();
 
     if (this._debugMode) {
-      console.debug(`[Executor] Starting Python process:`);
-      console.debug(`[Executor]   Python: ${this._pythonPath}`);
-      console.debug(`[Executor]   Script: ${this._kernelScriptPath}`);
-      console.debug(`[Executor]   CWD: ${this._workingDirectory}`);
+      this.logStartupInfo();
     }
 
     return new Promise((resolve) => {
       try {
-        // Build environment with optional Databricks profile
-        const env: NodeJS.ProcessEnv = { ...process.env };
-        if (this._profileName) {
-          env.DATABRICKS_CONFIG_PROFILE = this._profileName;
-        }
-        // Pass debug mode to Python kernel
-        if (this._debugMode) {
-          env.DATABRICKS_KERNEL_DEBUG = 'true';
-        }
+        const env = buildKernelEnvironment(this._profileName, this._debugMode);
+        this._process = this.spawnProcess(env);
 
-        this._process = cp.spawn(this._pythonPath, [this._kernelScriptPath], {
-          cwd: this._workingDirectory,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        const resolveOnce = createSingleUseResolver(resolve);
 
-        // Track if we've already resolved to prevent multiple resolutions
-        let resolved = false;
-        const resolveOnce = (value: boolean) => {
-          if (!resolved) {
-            resolved = true;
-            resolve(value);
-          }
-        };
-
-        // Set up readline for stdout IMMEDIATELY and synchronously
-        // This must happen before any async operations to avoid missing the ready signal
-        if (this._process.stdout) {
-          // Pause the stream to prevent data loss before readline is ready
-          this._process.stdout.pause();
-
-          this._readlineInterface = readline.createInterface({
-            input: this._process.stdout,
-            crlfDelay: Infinity,
-          });
-
-          this._readlineInterface.on('line', (line) => {
-            this.handleOutput(line);
-          });
-
-          // Resume the stream now that readline is listening
-          this._process.stdout.resume();
-        }
-
-        // Handle stderr - only log in debug mode or for non-debug messages
-        this._process.stderr?.on('data', (data) => {
-          const output = data.toString();
-          // Filter out kernel debug messages unless debug mode is enabled
-          if (this._debugMode || !output.includes('[KERNEL DEBUG]')) {
-            console.error('[Python Kernel stderr]:', output);
-          }
-        });
-
-        // Handle process errors
-        this._process.on('error', (error) => {
-          console.error('[Python Kernel error]:', error);
-          this._onDidChangeState.fire('error');
-          this.cleanup();
-          resolveOnce(false);
-        });
-
-        // Handle process exit
-        this._process.on('exit', (code, signal) => {
-          if (this._debugMode) {
-            console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
-          }
-          this._onDidChangeState.fire('stopped');
-          this.cleanup();
-          // If process exits before ready, resolve with false
-          if (!this._isReady) {
-            resolveOnce(false);
-          }
-        });
-
-        // Wait for ready signal with configurable timeout (default 30 seconds)
-        // Databricks Connect initialization can be slow on first run
-        const STARTUP_TIMEOUT_DEFAULT = 30000;
-        const startupTimeout = vscode.workspace
-          .getConfiguration('databricks-notebook')
-          .get<number>('kernelStartupTimeout', STARTUP_TIMEOUT_DEFAULT);
-
-        // Check for ready signal more frequently
-        // Define checkReady first so it can be referenced in the timeout callback
-        const checkReady: NodeJS.Timeout = setInterval(() => {
-          if (this._isReady) {
-            clearTimeout(readyTimeout);
-            clearInterval(checkReady);
-            resolveOnce(true);
-          }
-        }, 50);
-
-        const readyTimeout = setTimeout(() => {
-          if (!this._isReady) {
-            console.error(`[Python Kernel] Timeout waiting for ready signal (${startupTimeout}ms)`);
-            clearInterval(checkReady);
-            this.stop();
-            resolveOnce(false);
-          }
-        }, startupTimeout);
-
+        this.setupStdoutHandler();
+        this.setupStderrHandler();
+        this.setupProcessEventHandlers(resolveOnce);
+        this.setupReadyWaiter(resolveOnce);
       } catch (error) {
         console.error('[Python Kernel] Failed to start:', error);
         this._onDidChangeState.fire('error');
         resolve(false);
       }
     });
+  }
+
+  /**
+   * Log startup information in debug mode
+   */
+  private logStartupInfo(): void {
+    console.debug(`[Executor] Starting Python process:`);
+    console.debug(`[Executor]   Python: ${this._pythonPath}`);
+    console.debug(`[Executor]   Script: ${this._kernelScriptPath}`);
+    console.debug(`[Executor]   CWD: ${this._workingDirectory}`);
+  }
+
+  /**
+   * Spawn the Python process
+   */
+  private spawnProcess(env: NodeJS.ProcessEnv): cp.ChildProcess {
+    return cp.spawn(this._pythonPath, [this._kernelScriptPath], {
+      cwd: this._workingDirectory,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  }
+
+  /**
+   * Setup stdout handler with readline interface
+   */
+  private setupStdoutHandler(): void {
+    if (this._process?.stdout) {
+      this._readlineInterface = setupReadlineInterface(
+        this._process.stdout,
+        (line) => this.handleOutput(line)
+      );
+    }
+  }
+
+  /**
+   * Setup stderr handler with debug filtering
+   */
+  private setupStderrHandler(): void {
+    this._process?.stderr?.on('data', (data) => {
+      const output = data.toString();
+      if (shouldLogStderr(output, this._debugMode)) {
+        console.error('[Python Kernel stderr]:', output);
+      }
+    });
+  }
+
+  /**
+   * Setup process error and exit event handlers
+   */
+  private setupProcessEventHandlers(resolveOnce: (value: boolean) => void): void {
+    this._process?.on('error', (error) => {
+      console.error('[Python Kernel error]:', error);
+      this._onDidChangeState.fire('error');
+      this.cleanup();
+      resolveOnce(false);
+    });
+
+    this._process?.on('exit', (code, signal) => {
+      if (this._debugMode) {
+        console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
+      }
+      this._onDidChangeState.fire('stopped');
+      this.cleanup();
+      if (!this._isReady) {
+        resolveOnce(false);
+      }
+    });
+  }
+
+  /**
+   * Setup ready signal waiter with timeout
+   */
+  private setupReadyWaiter(resolveOnce: (value: boolean) => void): void {
+    const startupTimeout = getKernelStartupTimeout(KERNEL_STARTUP_TIMEOUT_MS);
+
+    createReadyWaiter(
+      () => this._isReady,
+      () => resolveOnce(true),
+      () => {
+        console.error(`[Python Kernel] Timeout waiting for ready signal (${startupTimeout}ms)`);
+        this.stop();
+        resolveOnce(false);
+      },
+      startupTimeout,
+      READY_CHECK_INTERVAL_MS
+    );
   }
 
   /**
@@ -263,92 +264,81 @@ export class PersistentExecutor implements vscode.Disposable {
       const response: KernelResponse = JSON.parse(line);
 
       if (response.type === 'ready') {
-        this._isReady = true;
-        this._onDidChangeState.fire('ready');
-        // Log Python info (Python protocol uses snake_case) - only in debug mode
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        if (this._debugMode && (response as { python_info?: string }).python_info) {
-          // eslint-disable-next-line @typescript-eslint/naming-convention
-          console.debug(`[Executor] ${(response as { python_info?: string }).python_info}`);
-        }
-
-        // Store and log venv info
-        if (response.venv_info) {
-          lastVenvInfo = response.venv_info;
-          if (response.venv_info.is_venv) {
-            const venvName = response.venv_info.venv_name || 'venv';
-            if (this._debugMode) {
-              console.debug(`[Executor] Using virtual environment: ${venvName} (${response.venv_info.venv_path})`);
-            }
-            // Show informational message about venv
-            vscode.window.showInformationMessage(`Kernel: Using virtual environment "${venvName}"`);
-          }
-        }
-
-        // Store and log databricks-connect version
-        if (response.databricks_connect_version) {
-          lastDbConnectVersion = response.databricks_connect_version;
-          if (this._debugMode) {
-            console.debug(`[Executor] databricks-connect version: ${response.databricks_connect_version}`);
-          }
-        }
-
-        // Store and log spark status
-        if (response.spark_status) {
-          lastSparkStatus = response.spark_status;
-          if (this._debugMode) {
-            console.debug(`[Executor] ${response.spark_status}`);
-          }
-          // Show notification for spark status
-          if (response.spark_status.startsWith('OK:')) {
-            vscode.window.showInformationMessage(`Kernel: ${response.spark_status}`);
-          } else if (response.spark_status.startsWith('WARN:')) {
-            vscode.window.showWarningMessage(`Kernel: ${response.spark_status}`);
-          }
-        }
+        this.handleReadySignal(response);
         return;
       }
 
-      if (response.id && this._pendingRequests.has(response.id)) {
-        const pending = this._pendingRequests.get(response.id)!;
-        clearTimeout(pending.timeout);
-        this._pendingRequests.delete(response.id);
-        pending.resolve(response);
-      }
+      this.handlePendingResponse(response);
     } catch (error) {
       console.error('[Python Kernel] Failed to parse output:', line, error);
     }
   }
 
   /**
-   * Get the last spark status from kernel initialization
+   * Handle ready signal from kernel
    */
-  static getLastSparkStatus(): string | undefined {
-    return lastSparkStatus;
+  private handleReadySignal(response: KernelResponse): void {
+    this._isReady = true;
+    this._onDidChangeState.fire('ready');
+
+    // Extract and store status info
+    const statusInfo = extractKernelStatusInfo(response as ReadyResponse);
+    this._venvInfo = statusInfo.venvInfo;
+    this._dbConnectVersion = statusInfo.dbConnectVersion;
+    this._sparkStatus = statusInfo.sparkStatus;
+
+    // Log in debug mode
+    if (this._debugMode) {
+      // eslint-disable-next-line @typescript-eslint/naming-convention
+      const pythonInfo = (response as { python_info?: string }).python_info;
+      logKernelStatusDebug(statusInfo, pythonInfo);
+    }
+
+    // Show user notifications
+    showKernelStatusNotifications(statusInfo);
   }
 
   /**
-   * Get the last venv info from kernel initialization
+   * Handle pending request response
    */
-  static getLastVenvInfo(): VenvInfo | undefined {
-    return lastVenvInfo;
+  private handlePendingResponse(response: KernelResponse): void {
+    if (response.id && this._pendingRequests.has(response.id)) {
+      const pending = this._pendingRequests.get(response.id)!;
+      clearTimeout(pending.timeout);
+      this._pendingRequests.delete(response.id);
+      pending.resolve(response);
+    }
   }
 
   /**
-   * Get the last databricks-connect version from kernel initialization
+   * Get the spark status from this executor's kernel initialization
    */
-  static getLastDbConnectVersion(): string | undefined {
-    return lastDbConnectVersion;
+  getSparkStatus(): string | undefined {
+    return this._sparkStatus;
+  }
+
+  /**
+   * Get the venv info from this executor's kernel initialization
+   */
+  getVenvInfo(): VenvInfo | undefined {
+    return this._venvInfo;
+  }
+
+  /**
+   * Get the databricks-connect version from this executor's kernel initialization
+   */
+  getDbConnectVersion(): string | undefined {
+    return this._dbConnectVersion;
   }
 
   /**
    * Execute Python code
    *
    * @param code - Python code to execute
-   * @param timeout - Execution timeout in milliseconds (default: 60000)
+   * @param timeout - Execution timeout in milliseconds (default: EXECUTION_TIMEOUT_MS)
    * @returns ExecutionResult
    */
-  async execute(code: string, timeout: number = 60000): Promise<ExecutionResult> {
+  async execute(code: string, timeout: number = EXECUTION_TIMEOUT_MS): Promise<ExecutionResult> {
     if (!this._process || !this._isReady) {
       const started = await this.start();
       if (!started) {
@@ -384,7 +374,7 @@ export class PersistentExecutor implements vscode.Disposable {
         success: false,
         stdout: '',
         stderr: '',
-        error: error instanceof Error ? error.message : String(error),
+        error: extractErrorMessage(error),
       };
     }
   }
@@ -404,7 +394,7 @@ export class PersistentExecutor implements vscode.Disposable {
     };
 
     try {
-      const response = await this.sendRequest(request, 5000);
+      const response = await this.sendRequest(request, SHORT_OPERATION_TIMEOUT_MS);
       return response.success;
     } catch {
       return false;
@@ -426,7 +416,7 @@ export class PersistentExecutor implements vscode.Disposable {
     };
 
     try {
-      const response = await this.sendRequest(request, 5000);
+      const response = await this.sendRequest(request, SHORT_OPERATION_TIMEOUT_MS);
       return response.variables || {};
     } catch {
       return {};
@@ -448,7 +438,7 @@ export class PersistentExecutor implements vscode.Disposable {
     };
 
     try {
-      const response = await this.sendRequest(request, 5000);
+      const response = await this.sendRequest(request, SHORT_OPERATION_TIMEOUT_MS);
       return response.success;
     } catch {
       return false;

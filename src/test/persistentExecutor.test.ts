@@ -331,23 +331,35 @@ describe('PersistentExecutor Tests', () => {
     });
   });
 
-  describe('Static Methods', () => {
-    it('getLastSparkStatus should return undefined or string', () => {
-      const status = PersistentExecutor.getLastSparkStatus();
-      // May be undefined or a value from previous tests
-      assert.ok(status === undefined || typeof status === 'string');
+  describe('Instance Status Methods', () => {
+    it('getSparkStatus should return undefined before initialization', () => {
+      const executor = new PersistentExecutor(
+        '/usr/bin/python3',
+        '/path/to/extension'
+      );
+      const status = executor.getSparkStatus();
+      assert.strictEqual(status, undefined);
+      executor.dispose();
     });
 
-    it('getLastVenvInfo should return undefined or object', () => {
-      const info = PersistentExecutor.getLastVenvInfo();
-      // May be undefined or a value from previous tests
-      assert.ok(info === undefined || typeof info === 'object');
+    it('getVenvInfo should return undefined before initialization', () => {
+      const executor = new PersistentExecutor(
+        '/usr/bin/python3',
+        '/path/to/extension'
+      );
+      const info = executor.getVenvInfo();
+      assert.strictEqual(info, undefined);
+      executor.dispose();
     });
 
-    it('getLastDbConnectVersion should return undefined or string', () => {
-      const version = PersistentExecutor.getLastDbConnectVersion();
-      // May be undefined or a value from previous tests
-      assert.ok(version === undefined || typeof version === 'string');
+    it('getDbConnectVersion should return undefined before initialization', () => {
+      const executor = new PersistentExecutor(
+        '/usr/bin/python3',
+        '/path/to/extension'
+      );
+      const version = executor.getDbConnectVersion();
+      assert.strictEqual(version, undefined);
+      executor.dispose();
     });
   });
 

@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { VirtualDocumentGenerator, VirtualDocument } from './virtualDocumentGenerator';
 import { DiagnosticMapper } from './diagnosticMapper';
+import { extractErrorMessage } from '../utils/errorHandler';
 
 /**
  * Provides cross-cell linting for Databricks notebooks
@@ -138,7 +139,7 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
     } catch (error) {
       console.error('[NotebookDiagnosticProvider] Failed to analyze notebook:', error);
       vscode.window.showErrorMessage(
-        `Failed to analyze notebook for linting: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to analyze notebook for linting: ${extractErrorMessage(error)}`
       );
     }
   }

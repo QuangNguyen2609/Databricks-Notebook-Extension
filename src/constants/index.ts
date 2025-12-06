@@ -1,11 +1,34 @@
 /**
- * Shared Constants for Databricks Notebook Viewer
+ * Shared Constants for Databricks Notebook Studio
  *
- * All magic commands, delimiters, and patterns are defined here
- * to ensure consistency across the codebase.
+ * All magic commands, delimiters, patterns, and timing constants
+ * are defined here to ensure consistency across the codebase.
  */
 
 import { MagicCommandConfig, CellType } from '../types';
+
+// ===== TIMING CONSTANTS =====
+
+/** Default timeout for processing document state cleanup (ms) */
+export const PROCESSING_TIMEOUT_MS = 500;
+
+/** Default debounce delay for linting updates (ms) */
+export const LINTING_DEBOUNCE_MS = 500;
+
+/** Default delay for environment refresh after Python extension update (ms) */
+export const ENVIRONMENT_REFRESH_DELAY_MS = 500;
+
+/** Default kernel startup timeout (ms) */
+export const KERNEL_STARTUP_TIMEOUT_MS = 30000;
+
+/** Default execution timeout (ms) */
+export const EXECUTION_TIMEOUT_MS = 60000;
+
+/** Default timeout for short operations like ping/reset (ms) */
+export const SHORT_OPERATION_TIMEOUT_MS = 5000;
+
+/** Interval for checking kernel ready state (ms) */
+export const READY_CHECK_INTERVAL_MS = 50;
 
 // ===== NOTEBOOK FORMAT CONSTANTS =====
 
@@ -57,6 +80,17 @@ export const LANGUAGE_TO_MAGIC: Record<string, string> = {
   'scala': '%scala',
   'r': '%r',
   'shellscript': '%sh',
+};
+
+/**
+ * Mapping of magic commands to VS Code language IDs
+ * For converting from magic command to language
+ */
+export const MAGIC_TO_LANGUAGE: Record<string, string> = {
+  '%sql': 'sql',
+  '%scala': 'scala',
+  '%r': 'r',
+  '%sh': 'shellscript',
 };
 
 /**
