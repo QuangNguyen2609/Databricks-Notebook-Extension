@@ -227,6 +227,17 @@ export class PersistentExecutor implements vscode.Disposable {
         const startupTimeout = vscode.workspace
           .getConfiguration('databricks-notebook')
           .get<number>('kernelStartupTimeout', STARTUP_TIMEOUT_DEFAULT);
+
+        // Check for ready signal more frequently
+        // Define checkReady first so it can be referenced in the timeout callback
+        const checkReady: NodeJS.Timeout = setInterval(() => {
+          if (this._isReady) {
+            clearTimeout(readyTimeout);
+            clearInterval(checkReady);
+            resolveOnce(true);
+          }
+        }, 50);
+
         const readyTimeout = setTimeout(() => {
           if (!this._isReady) {
             console.error(`[Python Kernel] Timeout waiting for ready signal (${startupTimeout}ms)`);
@@ -235,15 +246,6 @@ export class PersistentExecutor implements vscode.Disposable {
             resolveOnce(false);
           }
         }, startupTimeout);
-
-        // Check for ready signal more frequently
-        const checkReady = setInterval(() => {
-          if (this._isReady) {
-            clearTimeout(readyTimeout);
-            clearInterval(checkReady);
-            resolveOnce(true);
-          }
-        }, 50);
 
       } catch (error) {
         console.error('[Python Kernel] Failed to start:', error);

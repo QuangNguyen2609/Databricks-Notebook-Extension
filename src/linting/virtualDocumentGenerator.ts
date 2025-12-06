@@ -186,7 +186,8 @@ export class VirtualDocumentGenerator {
    */
   getVirtualFilePath(notebookUri: vscode.Uri): string {
     // Create hash of notebook URI for unique filename
-    const hash = crypto.createHash('md5').update(notebookUri.toString()).digest('hex');
+    // Use SHA256 instead of MD5 for better collision resistance (truncated to 32 chars for reasonable filename length)
+    const hash = crypto.createHash('sha256').update(notebookUri.toString()).digest('hex').substring(0, 32);
     return path.join(this.cacheDir, `notebook-${hash}.virtual.py`);
   }
 
