@@ -8,11 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.5] - 2025-12-05
 
 ### Fixed
+- **Async/Await Optimizations**: Eliminated UI-blocking operations and improved reliability
+  - ProfileManager: Replaced sync file reads with async operations (no more freezing on profile load)
+  - PythonExtensionApi: Replaced 20-50+ sync filesystem checks with async parallel checks (faster Python environment discovery, especially on Windows)
+  - PersistentExecutor: Fixed interval cleanup race condition (prevents memory leak)
+  - KernelManager: Added error handling for failed kernel restarts (user now sees warnings instead of silent failures)
+  - NotebookDiagnosticProvider: Fixed disposal race condition (prevents resource access after cleanup)
 - **SQL Auto-Detect Loop**: Fixed annoying issue where deleting `%sql` from a cell would cause it to immediately reappear when typing any character
-  - **Root Cause**: Cell replacement via `NotebookEdit.replaceCells` creates a new document URI, breaking the URI-based tracking mechanism (`autoDetectedCells` Set)
-  - **Solution**: Use persistent `disableSqlAutoDetect` metadata flag instead of URI-based tracking
-  - Flag is automatically cleared when content no longer starts with SQL keywords (e.g., after wrapping in `spark.sql()`)
-  - Allows normal auto-detect for fresh cells while preventing unwanted re-conversion of intentionally converted cells
+- **Concurrent API/Function Calls**: Parallelized sequential operations for better performance with notebook operations
+- **JSON serialization for display()**: Apply safe serialization with fallback for robust rendering and doesn't fail the process if one value is corrupted
+
 
 ## [0.3.4] - 2025-12-04
 

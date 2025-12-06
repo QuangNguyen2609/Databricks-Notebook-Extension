@@ -51,10 +51,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
-  // Initialize ProfileManager for Databricks authentication
+  // Initialize ProfileManager and KernelManager in parallel for faster startup
   profileManager = new ProfileManager(context);
   context.subscriptions.push(profileManager);
-  await profileManager.loadProfiles();
+
+  kernelManager = new KernelManager(context.extensionPath, profileManager);
+  context.subscriptions.push(kernelManager);
+
+  // Run profile loading and kernel initialization concurrently
+  const [profileLoadResult, kernelInitResult] = await Promise.allSettled([
+    profileManager.loadProfiles(),
+    kernelManager.initialize()
+  ]);
+
+  // Handle profile loading result
+  if (profileLoadResult.status === 'rejected') {
+    console.error('Failed to load profiles:', profileLoadResult.reason);
+  }
+
+  // Handle kernel initialization result
+  if (kernelInitResult.status === 'fulfilled') {
+    console.log(`Kernel manager initialized with ${kernelManager?.getControllerCount()} controllers`);
+  } else {
+    console.error('Failed to initialize kernel manager:', kernelInitResult.reason);
+    // Non-fatal error - continue without kernel support
+  }
 
   // Initialize Status Bar (if enabled in settings)
   const config = vscode.workspace.getConfiguration('databricks-notebook');
@@ -77,17 +98,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     })
   );
-
-  // Initialize kernel manager for Python execution support
-  kernelManager = new KernelManager(context.extensionPath, profileManager);
-  context.subscriptions.push(kernelManager);
-
-  // Initialize asynchronously (discovers Python environments)
-  kernelManager.initialize().then(() => {
-    console.log(`Kernel manager initialized with ${kernelManager?.getControllerCount()} controllers`);
-  }).catch((error) => {
-    console.error('Failed to initialize kernel manager:', error);
-  });
 
   // Initialize cross-cell linting provider
   try {
@@ -167,8 +177,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Auto-detect SQL cells based on content (SELECT, INSERT, etc.)
   context.subscriptions.push(
-    vscode.workspace.onDidChangeNotebookDocument((event) => {
-      handleNotebookCellChanges(event);
+    vscode.workspace.onDidChangeNotebookDocument(async (event) => {
+      try {
+        await handleNotebookCellChanges(event);
+      } catch (err) {
+        console.error('[Notebook Change] Failed to handle notebook change event:', err);
+      }
     })
   );
 
@@ -532,8 +546,12 @@ async function ensureMagicCommand(
     languageId
   );
 
+  // Clear disableSqlAutoDetect flag if present (user is manually converting back)
+  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
+  delete metadata.disableSqlAutoDetect;
+
   cellData.metadata = {
-    ...cell.metadata,
+    ...metadata,
     databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
   };
 
@@ -563,7 +581,7 @@ async function ensureMagicCommand(
  * @param notebook - The notebook document
  * @param cell - The newly added cell
  */
-function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.NotebookCell): void {
+async function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.NotebookCell): Promise<void> {
   // Only process code cells
   if (cell.kind !== vscode.NotebookCellKind.Code) {
     return;
@@ -582,7 +600,7 @@ function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.NotebookC
 
   // If language requires magic command and content doesn't have it
   if (requiredMagic && !contentStartsWithMagic(content, requiredMagic)) {
-    ensureMagicCommand(notebook, cell, requiredMagic, languageId);
+    await ensureMagicCommand(notebook, cell, requiredMagic, languageId);
   }
 }
 
@@ -645,7 +663,63 @@ async function removeMagicCommand(
     const notebookEditor = vscode.window.activeNotebookEditor;
     if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
       notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      vscode.commands.executeCommand('notebook.cell.edit');
+      await vscode.commands.executeCommand('notebook.cell.edit');
+    }
+  }
+}
+
+/**
+ * Convert a Python cell to a magic-command language (SQL, Scala, R, Shell)
+ * Called when user manually types magic command or changes language via UI
+ * @param notebook - The notebook document
+ * @param cell - The cell to convert
+ * @param languageId - The target language ID
+ * @param magicCommand - The magic command (e.g., '%sql')
+ */
+async function convertCellToLanguage(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  languageId: string,
+  magicCommand: string
+): Promise<void> {
+  const cellKey = cell.document.uri.toString();
+  const cellIndex = cell.index;
+  const content = cell.document.getText();
+
+  // Mark as processed to prevent infinite loops
+  autoDetectedCells.add(cellKey);
+
+  const edit = new vscode.WorkspaceEdit();
+
+  const cellData = new vscode.NotebookCellData(
+    vscode.NotebookCellKind.Code,
+    content,
+    languageId
+  );
+
+  // Clear disableSqlAutoDetect flag and set appropriate databricksType
+  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
+  delete metadata.disableSqlAutoDetect;
+  cellData.metadata = {
+    ...metadata,
+    databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
+  };
+
+  edit.set(notebook.uri, [
+    vscode.NotebookEdit.replaceCells(
+      new vscode.NotebookRange(cellIndex, cellIndex + 1),
+      [cellData]
+    )
+  ]);
+
+  const success = await vscode.workspace.applyEdit(edit);
+
+  if (success) {
+    // Restore cursor to the cell and enter edit mode
+    const notebookEditor = vscode.window.activeNotebookEditor;
+    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
+      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
+      await vscode.commands.executeCommand('notebook.cell.edit');
     }
   }
 }
@@ -700,7 +774,7 @@ async function convertToPythonCell(
     const notebookEditor = vscode.window.activeNotebookEditor;
     if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
       notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      vscode.commands.executeCommand('notebook.cell.edit');
+      await vscode.commands.executeCommand('notebook.cell.edit');
     }
   }
 }
@@ -739,7 +813,16 @@ async function clearDisableSqlAutoDetectFlag(
     )
   ]);
 
-  await vscode.workspace.applyEdit(edit);
+  const success = await vscode.workspace.applyEdit(edit);
+
+  if (success) {
+    // Restore cursor to the cell and enter edit mode
+    const notebookEditor = vscode.window.activeNotebookEditor;
+    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
+      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
+      await vscode.commands.executeCommand('notebook.cell.edit');
+    }
+  }
 }
 
 /**
@@ -747,10 +830,10 @@ async function clearDisableSqlAutoDetectFlag(
  * @param notebook - The notebook document
  * @param change - The cell change event
  */
-function handleCellContentChange(
+async function handleCellContentChange(
   notebook: vscode.NotebookDocument,
   change: { cell: vscode.NotebookCell; document?: vscode.TextDocument; metadata?: unknown; outputs?: unknown }
-): void {
+): Promise<void> {
   const cell = change.cell;
 
   // Only process code cells
@@ -764,21 +847,50 @@ function handleCellContentChange(
 
   const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
 
-  // Handle magic-command language cells (SQL, Scala, R, Shell) where user removed the magic command
-  // When user deletes the magic command (e.g., %sql), convert the cell back to Python
-  if (requiredMagic && !contentStartsWithMagic(content, requiredMagic) && !autoDetectedCells.has(cellKey)) {
-    convertToPythonCell(notebook, cell, content);
+  // Handle magic-command language cells (SQL, Scala, R, Shell) without magic command
+  // This happens when: 1) user changes language via picker, 2) user manually removes magic
+  if (requiredMagic && !contentStartsWithMagic(content, requiredMagic)) {
+    // Skip if we just processed this cell to avoid infinite loops
+    if (autoDetectedCells.has(cellKey)) {
+      return;
+    }
+
+    // If disableSqlAutoDetect flag is set, user is converting back to SQL via language picker
+    // Add the magic command and clear the flag
+    if (cell.metadata?.disableSqlAutoDetect === true) {
+      await ensureMagicCommand(notebook, cell, requiredMagic, languageId);
+      return;
+    }
+
+    // If cell has content but no magic command, user manually deleted it
+    // Convert back to Python
+    if (content.length > 0) {
+      await convertToPythonCell(notebook, cell, content);
+      return;
+    }
+
+    // Otherwise, it's a fresh/empty cell via language picker
+    // Add the magic command
+    await ensureMagicCommand(notebook, cell, requiredMagic, languageId);
     return;
   }
 
   // Handle language change FROM magic-command language to Python
-  // If language is now Python but content still has a magic command, remove it
+  // If language is now Python but content still has a magic command, handle it
   if (languageId === 'python' && !autoDetectedCells.has(cellKey)) {
-    // Check if content starts with any magic command that should be removed
+    // Check if content starts with any magic command
     // Use sorted list (longest first) to prevent %r matching %run
     for (const magic of SORTED_MAGIC_COMMANDS) {
       if (contentStartsWithMagic(content, magic)) {
-        removeMagicCommand(notebook, cell, magic, languageId);
+        // If user manually added magic command (disableSqlAutoDetect flag is set),
+        // convert to the appropriate language immediately
+        if (cell.metadata?.disableSqlAutoDetect === true) {
+          const targetLanguage = magic === '%sql' ? 'sql' : magic === '%scala' ? 'scala' : magic === '%r' ? 'r' : 'shellscript';
+          await convertCellToLanguage(notebook, cell, targetLanguage, magic);
+          return;
+        }
+        // Otherwise, remove the magic command (language was changed to Python)
+        await removeMagicCommand(notebook, cell, magic, languageId);
         return;
       }
     }
@@ -788,18 +900,18 @@ function handleCellContentChange(
     const hasSqlKeywords = SQL_KEYWORDS_REGEX.test(content);
 
     if (disableSqlAutoDetect) {
-      // If content no longer starts with SQL keywords (e.g., wrapped in spark.sql()),
-      // clear the flag to allow future auto-detect
-      if (!hasSqlKeywords) {
-        clearDisableSqlAutoDetectFlag(notebook, cell);
+      // Skip auto-detect while flag is set (user is editing the converted cell).
+      // Don't clear the flag during typing to avoid disruptive cell replacements.
+      // The flag will be cleared when cell is empty or notebook is reloaded.
+      if (content.length === 0) {
+        await clearDisableSqlAutoDetectFlag(notebook, cell);
       }
-      // Skip auto-detect while flag is set (user is editing the converted cell)
       return;
     }
 
     // Auto-detect SQL in Python cells (existing functionality)
     if (hasSqlKeywords) {
-      ensureMagicCommand(notebook, cell, '%sql', 'sql');
+      await ensureMagicCommand(notebook, cell, '%sql', 'sql');
     }
   }
 }
@@ -808,7 +920,7 @@ function handleCellContentChange(
  * Handle notebook cell content changes for auto-detection
  * @param event - The notebook document change event
  */
-function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEvent): void {
+async function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEvent): Promise<void> {
   // Only process our notebook type
   if (event.notebook.notebookType !== 'databricks-notebook') {
     return;
@@ -821,17 +933,20 @@ function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEvent): v
     }
   }
 
-  // 2. Handle newly added cells (for magic command injection)
+  // 2. Handle newly added cells (for magic command injection) - process in parallel
+  const addedCellPromises: Promise<void>[] = [];
   for (const contentChange of event.contentChanges) {
     for (const addedCell of contentChange.addedCells) {
-      handleNewCell(event.notebook, addedCell);
+      addedCellPromises.push(handleNewCell(event.notebook, addedCell));
     }
   }
+  await Promise.all(addedCellPromises);
 
-  // 3. Process cell content/language changes
-  for (const change of event.cellChanges) {
-    handleCellContentChange(event.notebook, change);
-  }
+  // 3. Process cell content/language changes - process in parallel
+  const changePromises = event.cellChanges.map((change) =>
+    handleCellContentChange(event.notebook, change)
+  );
+  await Promise.all(changePromises);
 }
 
 /**

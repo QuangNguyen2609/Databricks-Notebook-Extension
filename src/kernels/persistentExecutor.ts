@@ -223,10 +223,14 @@ export class PersistentExecutor implements vscode.Disposable {
 
         // Wait for ready signal with configurable timeout (default 30 seconds)
         // Databricks Connect initialization can be slow on first run
-        const startupTimeout = vscode.workspace.getConfiguration('databricks-notebook').get<number>('kernelStartupTimeout', 30000);
+        const STARTUP_TIMEOUT_DEFAULT = 30000;
+        const startupTimeout = vscode.workspace
+          .getConfiguration('databricks-notebook')
+          .get<number>('kernelStartupTimeout', STARTUP_TIMEOUT_DEFAULT);
         const readyTimeout = setTimeout(() => {
           if (!this.isReady) {
             console.error(`[Python Kernel] Timeout waiting for ready signal (${startupTimeout}ms)`);
+            clearInterval(checkReady);
             this.stop();
             resolveOnce(false);
           }

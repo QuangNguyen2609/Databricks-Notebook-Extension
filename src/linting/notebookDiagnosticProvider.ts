@@ -22,6 +22,7 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
   private debounceMs: number;
   private enabled: boolean;
   private includeDatabricksPreamble: boolean;
+  private pendingUpdates: Set<Promise<void>> = new Set();
 
   /**
    * Create a new NotebookDiagnosticProvider
@@ -120,9 +121,7 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
       (nb) => nb.notebookType === 'databricks-notebook'
     );
 
-    for (const notebook of notebooks) {
-      await this.analyzeNotebook(notebook);
-    }
+    await Promise.all(notebooks.map((notebook) => this.analyzeNotebook(notebook)));
   }
 
   /**
@@ -157,9 +156,17 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
     }
 
     // Schedule new update
-    const timeout = setTimeout(async () => {
-      await this.updateDiagnostics(notebook);
-      this.updateDebounce.delete(key);
+    const timeout = setTimeout(() => {
+      const updatePromise = this.updateDiagnostics(notebook)
+        .catch((error) => {
+          console.error('[NotebookDiagnosticProvider] Failed to update diagnostics:', error);
+        })
+        .finally(() => {
+          this.updateDebounce.delete(key);
+          this.pendingUpdates.delete(updatePromise);
+        });
+
+      this.pendingUpdates.add(updatePromise);
     }, this.debounceMs);
 
     this.updateDebounce.set(key, timeout);
@@ -322,12 +329,18 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
     }
     this.updateDebounce.clear();
 
-    // Clear diagnostics
-    this.diagnosticCollection.clear();
+    // Wait for pending updates to complete (with timeout)
+    Promise.race([
+      Promise.all(this.pendingUpdates),
+      new Promise(resolve => setTimeout(resolve, 1000))  // 1s timeout
+    ]).finally(() => {
+      // Clear diagnostics
+      this.diagnosticCollection.clear();
 
-    // Dispose of event listeners
-    this.disposables.forEach((d) => d.dispose());
+      // Dispose of event listeners
+      this.disposables.forEach((d) => d.dispose());
 
-    console.log('[NotebookDiagnosticProvider] Disposed');
+      console.log('[NotebookDiagnosticProvider] Disposed');
+    });
   }
 }

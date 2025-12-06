@@ -173,19 +173,19 @@ export class PythonExtensionApi {
         console.debug(`[PythonExtensionApi] Python API environments.known not available`);
       }
 
-      // Discover conda environments via conda command (works on all platforms)
-      const condaEnvs = await this.discoverCondaEnvironmentsViaCommand(seenPaths);
-      environments.push(...condaEnvs);
+      // Discover environments in parallel for faster startup
+      const [condaEnvs, additionalEnvs, workspaceEnvs] = await Promise.all([
+        // Discover conda environments via conda command (works on all platforms)
+        this.discoverCondaEnvironmentsViaCommand(seenPaths),
+        // On Windows, manually discover additional environments that Python extension might miss
+        process.platform === 'win32'
+          ? this.discoverWindowsEnvironments(seenPaths)
+          : Promise.resolve([]),
+        // Also check for .venv in workspace folders
+        this.discoverWorkspaceEnvironments(seenPaths)
+      ]);
 
-      // On Windows, manually discover additional environments that Python extension might miss
-      if (process.platform === 'win32') {
-        const additionalEnvs = await this.discoverWindowsEnvironments(seenPaths);
-        environments.push(...additionalEnvs);
-      }
-
-      // Also check for .venv in workspace folders
-      const workspaceEnvs = await this.discoverWorkspaceEnvironments(seenPaths);
-      environments.push(...workspaceEnvs);
+      environments.push(...condaEnvs, ...additionalEnvs, ...workspaceEnvs);
 
       return environments;
     } catch (error) {
@@ -221,7 +221,7 @@ export class PythonExtensionApi {
       for (const venvName of venvNames) {
         const venvPath = path.join(folder.uri.fsPath, venvName, scriptsDir, pythonExe);
 
-        if (this.fileExists(venvPath) && !seenPaths.has(this.normalizePath(venvPath))) {
+        if (await this.fileExistsAsync(venvPath) && !seenPaths.has(this.normalizePath(venvPath))) {
           console.debug(`[PythonExtensionApi] Found workspace venv: ${venvPath}`);
           const env = await this.createEnvironmentFromPath(venvPath, 'venv', `${venvName} (${folder.name})`);
           if (env) {
@@ -263,10 +263,19 @@ export class PythonExtensionApi {
       'C:\\ProgramData\\anaconda3',
     ];
 
-    // Check for conda base environments
-    for (const condaBase of condaLocations) {
-      const pythonPath = path.join(condaBase, 'python.exe');
-      if (this.fileExists(pythonPath) && !seenPaths.has(this.normalizePath(pythonPath))) {
+    // Check for conda base environments with parallel checks
+    const condaBaseChecks = await Promise.all(
+      condaLocations.map(async (condaBase) => {
+        const pythonPath = path.join(condaBase, 'python.exe');
+        const exists = await this.fileExistsAsync(pythonPath);
+        const envsPath = path.join(condaBase, 'envs');
+        const envsExists = await this.directoryExistsAsync(envsPath);
+        return { condaBase, pythonPath, exists, envsPath, envsExists };
+      })
+    );
+
+    for (const { pythonPath, exists, envsPath, envsExists } of condaBaseChecks) {
+      if (exists && !seenPaths.has(this.normalizePath(pythonPath))) {
         console.debug(`[PythonExtensionApi] Found conda base: ${pythonPath}`);
         const env = await this.createEnvironmentFromPath(pythonPath, 'conda', 'conda (base)');
         if (env) {
@@ -276,21 +285,35 @@ export class PythonExtensionApi {
       }
 
       // Check for conda environments in envs folder
-      const envsPath = path.join(condaBase, 'envs');
-      if (this.directoryExists(envsPath)) {
+      if (envsExists) {
         try {
-          const envDirs = fs.readdirSync(envsPath);
-          for (const envDir of envDirs) {
-            const envPythonPath = path.join(envsPath, envDir, 'python.exe');
-            if (this.fileExists(envPythonPath) && !seenPaths.has(this.normalizePath(envPythonPath))) {
+          const envDirs = await fs.promises.readdir(envsPath);
+          // Check all conda environments in parallel
+          const condaEnvChecks = await Promise.all(
+            envDirs.map(async (envDir) => {
+              const envPythonPath = path.join(envsPath, envDir, 'python.exe');
+              const exists = await this.fileExistsAsync(envPythonPath);
+              return { envDir, envPythonPath, exists };
+            })
+          );
+
+          // Create environments for valid paths in parallel
+          const condaEnvPromises = condaEnvChecks
+            .filter(({ envPythonPath, exists }) => exists && !seenPaths.has(this.normalizePath(envPythonPath)))
+            .map(({ envDir, envPythonPath }) => {
               console.debug(`[PythonExtensionApi] Found conda env: ${envPythonPath}`);
-              const env = await this.createEnvironmentFromPath(envPythonPath, 'conda', `conda (${envDir})`);
-              if (env) {
-                environments.push(env);
-                seenPaths.add(this.normalizePath(envPythonPath));
-              }
-            }
-          }
+              return this.createEnvironmentFromPath(envPythonPath, 'conda', `conda (${envDir})`)
+                .then((env) => {
+                  if (env) {
+                    seenPaths.add(this.normalizePath(envPythonPath));
+                    return env;
+                  }
+                  return null;
+                });
+            });
+
+          const condaEnvResults = await Promise.all(condaEnvPromises);
+          environments.push(...condaEnvResults.filter((env): env is PythonEnvironment => env !== null));
         } catch (error) {
           console.warn(`[PythonExtensionApi] Failed to read conda envs at ${envsPath}:`, error);
         }
@@ -300,20 +323,35 @@ export class PythonExtensionApi {
     // Check pyenv-win locations
     const pyenvRoot = process.env.PYENV_ROOT || path.join(userProfile, '.pyenv', 'pyenv-win');
     const pyenvVersionsPath = path.join(pyenvRoot, 'versions');
-    if (this.directoryExists(pyenvVersionsPath)) {
+    if (await this.directoryExistsAsync(pyenvVersionsPath)) {
       try {
-        const versions = fs.readdirSync(pyenvVersionsPath);
-        for (const version of versions) {
-          const versionPythonPath = path.join(pyenvVersionsPath, version, 'python.exe');
-          if (this.fileExists(versionPythonPath) && !seenPaths.has(this.normalizePath(versionPythonPath))) {
+        const versions = await fs.promises.readdir(pyenvVersionsPath);
+        // Check all pyenv versions in parallel
+        const pyenvChecks = await Promise.all(
+          versions.map(async (version) => {
+            const versionPythonPath = path.join(pyenvVersionsPath, version, 'python.exe');
+            const exists = await this.fileExistsAsync(versionPythonPath);
+            return { version, versionPythonPath, exists };
+          })
+        );
+
+        // Create environments for valid paths in parallel
+        const pyenvPromises = pyenvChecks
+          .filter(({ versionPythonPath, exists }) => exists && !seenPaths.has(this.normalizePath(versionPythonPath)))
+          .map(({ version, versionPythonPath }) => {
             console.debug(`[PythonExtensionApi] Found pyenv version: ${versionPythonPath}`);
-            const env = await this.createEnvironmentFromPath(versionPythonPath, 'pyenv', `pyenv (${version})`);
-            if (env) {
-              environments.push(env);
-              seenPaths.add(this.normalizePath(versionPythonPath));
-            }
-          }
-        }
+            return this.createEnvironmentFromPath(versionPythonPath, 'pyenv', `pyenv (${version})`)
+              .then((env) => {
+                if (env) {
+                  seenPaths.add(this.normalizePath(versionPythonPath));
+                  return env;
+                }
+                return null;
+              });
+          });
+
+        const pyenvResults = await Promise.all(pyenvPromises);
+        environments.push(...pyenvResults.filter((env): env is PythonEnvironment => env !== null));
       } catch (error) {
         console.warn(`[PythonExtensionApi] Failed to read pyenv versions:`, error);
       }
@@ -364,25 +402,37 @@ export class PythonExtensionApi {
 
             console.debug(`[PythonExtensionApi] Conda found ${envPaths.length} environments`);
 
-            for (const envPath of envPaths) {
-              const pythonExe = process.platform === 'win32' ? 'python.exe' : 'python';
-              const pythonPath = path.join(envPath, pythonExe);
-
-              if (this.fileExists(pythonPath) && !seenPaths.has(this.normalizePath(pythonPath))) {
-                // Determine environment name from path
+            // Check all conda paths in parallel
+            const pythonExe = process.platform === 'win32' ? 'python.exe' : 'python';
+            const condaPathChecks = await Promise.all(
+              envPaths.map(async (envPath) => {
+                const pythonPath = path.join(envPath, pythonExe);
+                const exists = await this.fileExistsAsync(pythonPath);
                 const envName = path.basename(envPath);
-                const isBase =
-                  envPath === condaInfo.root_prefix || envPath === condaInfo.conda_prefix;
+                const isBase = envPath === condaInfo.root_prefix || envPath === condaInfo.conda_prefix;
                 const displayName = isBase ? 'base' : envName;
+                return { pythonPath, exists, displayName };
+              })
+            );
 
+            // Create environments for valid paths in parallel
+            const envPromises = condaPathChecks
+              .filter(({ pythonPath, exists }) => exists && !seenPaths.has(this.normalizePath(pythonPath)))
+              .map(({ pythonPath, displayName }) => {
                 console.debug(`[PythonExtensionApi] Found conda env via command: ${pythonPath} (${displayName})`);
-                const env = await this.createEnvironmentFromPath(pythonPath, 'conda', `conda (${displayName})`);
-                if (env) {
-                  environments.push(env);
-                  seenPaths.add(this.normalizePath(pythonPath));
-                }
-              }
-            }
+                return this.createEnvironmentFromPath(pythonPath, 'conda', `conda (${displayName})`)
+                  .then((env) => {
+                    if (env) {
+                      seenPaths.add(this.normalizePath(pythonPath));
+                      return env;
+                    }
+                    return null;
+                  });
+              });
+
+            // Execute all environment creation in parallel
+            const envResults = await Promise.all(envPromises);
+            environments.push(...envResults.filter((env): env is PythonEnvironment => env !== null));
           } catch (parseError) {
             console.warn('[PythonExtensionApi] Failed to parse conda info:', parseError);
           }
@@ -470,7 +520,31 @@ export class PythonExtensionApi {
   }
 
   /**
-   * Check if a file exists
+   * Check if a file exists (async)
+   */
+  private async fileExistsAsync(filePath: string): Promise<boolean> {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      return stat.isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if a directory exists (async)
+   */
+  private async directoryExistsAsync(dirPath: string): Promise<boolean> {
+    try {
+      const stat = await fs.promises.stat(dirPath);
+      return stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if a file exists (sync - kept for backward compatibility in child processes)
    */
   private fileExists(filePath: string): boolean {
     try {
@@ -481,7 +555,7 @@ export class PythonExtensionApi {
   }
 
   /**
-   * Check if a directory exists
+   * Check if a directory exists (sync - kept for backward compatibility in child processes)
    */
   private directoryExists(dirPath: string): boolean {
     try {

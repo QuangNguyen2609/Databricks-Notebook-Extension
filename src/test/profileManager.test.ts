@@ -49,14 +49,14 @@ const mockVscode = {
 };
 
 // Replace vscode import with mock
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Module = require('module');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import Module from 'module';
 const originalRequire = Module.prototype.require;
-Module.prototype.require = function(id: string, ...args: unknown[]) {
+Module.prototype.require = function(id: string) {
   if (id === 'vscode') {
     return mockVscode;
   }
-  return originalRequire.apply(this, [id, ...args]);
+  return originalRequire.apply(this, [id]);
 };
 
 // Now import ProfileManager
