@@ -6,8 +6,8 @@ A VS Code extension that renders Databricks `.py` notebook files as proper noteb
 
 - **Visual Cell Separation**: Clearly separated cells with proper boundaries
 - **Rendered Markdown**: Markdown cells are rendered with full formatting support
-- **Syntax Highlighting**: Support for Python, SQL, Scala, R, and shell code cells
-- **Magic Command Interpretation**: Automatic detection of `%md`, `%sql`, `%python`, `%run`, `%sh`, `%fs`, `%pip` commands
+- **Syntax Highlighting**: Support for Python, SQL and shell code cells
+- **Magic Command Interpretation**: Automatic detection of `%md`, `%sql`, `%python`, `%pip` commands
 - **Cell Titles**: Support for `DBTITLE` metadata
 - **Round-trip Editing**: Edit and save notebooks while preserving Databricks format
 - **Multi-Profile Authentication**: Manage and switch between multiple Databricks profiles
@@ -21,16 +21,28 @@ A VS Code extension that renders Databricks `.py` notebook files as proper noteb
 | Cell Type | Magic Command | Description |
 |-----------|--------------|-------------|
 | Python | (default) | Default Python code cells |
-| Markdown | `%md`, `%md-sandbox` | Rendered markdown content |
+| Markdown | `%md` | Rendered markdown content |
 | SQL | `%sql` | SQL queries with syntax highlighting |
-| Scala | `%scala` | Scala code cells |
-| R | `%r` | R code cells |
 | Shell | `%sh` | Shell/bash commands |
-| Filesystem | `%fs` | Databricks filesystem commands |
 | Run | `%run` | Execute other notebooks |
 | Pip | `%pip` | Package installation |
 
 ## Installation
+
+### Prerequisites
+
+This extension requires the following VS Code extensions (you'll be prompted to install them):
+- **[Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python)** - For Python kernel execution
+- **[Databricks](https://marketplace.visualstudio.com/items?itemName=databricks.databricks)** - For workspace configuration and authentication
+
+**Important: Databricks Connect Version Requirement**
+
+For serverless compute support, you must use **Databricks Connect version 17.2 or earlier**. Version 17.3+ does not support serverless compute.
+
+```bash
+# Install the correct version in your project's virtual environment
+pip install "databricks-connect<=17.2"
+```
 
 ### Download from GitHub Releases (Recommended)
 
@@ -38,6 +50,7 @@ A VS Code extension that renders Databricks `.py` notebook files as proper noteb
 2. Download the `.vsix` file
 3. In VS Code: `Ctrl+Shift+P` → "Extensions: Install from VSIX..."
 4. Select the downloaded `.vsix` file
+5. Install the required dependencies when prompted
 
 ### Build from Source
 
@@ -79,7 +92,26 @@ The status bar shows:
 
 #### Profile Configuration
 
-Profiles are read from `~/.databrickscfg`. Set up your profiles using the Databricks CLI:
+**Recommended: Use the Databricks Extension (Required Dependency)**
+
+The easiest way to configure profiles is through the official [Databricks extension for VS Code](https://marketplace.visualstudio.com/items?itemName=databricks.databricks):
+
+1. Install the Databricks extension (automatically prompted as a dependency)
+2. Open Command Palette (`Ctrl+Shift+P`) → "Databricks: Configure workspace"
+3. Follow the authentication flow to log in to your Databricks workspace
+
+For detailed setup instructions, see the [Databricks Extension Quickstart Guide](https://github.com/databricks/databricks-vscode/blob/main/packages/databricks-vscode/DATABRICKS.quickstart.md).
+
+The Databricks extension automatically:
+- Creates and manages your `~/.databrickscfg` file with profile configurations
+- Generates and refreshes OAuth tokens in `~/.databricks/token-cache.json`
+- Enables seamless auto-sync between local files and Databricks workspace
+
+This integration allows the Databricks Notebook Viewer to automatically authenticate with your configured profiles without manual token management.
+
+**Alternative: Databricks CLI**
+
+You can also configure profiles using the Databricks CLI:
 
 ```bash
 # Login to Databricks (creates/updates profile)

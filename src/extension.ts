@@ -676,9 +676,14 @@ async function convertToPythonCell(
     'python'
   );
 
+  // Set disableSqlAutoDetect flag to prevent SQL auto-detection from re-adding %sql
+  // when user types. This flag persists across cell replacements (unlike autoDetectedCells
+  // Set which tracks by URI that changes on replacement). The flag is cleared when content
+  // no longer contains SQL keywords, allowing auto-detect to work again for fresh SQL.
   cellData.metadata = {
     ...cell.metadata,
     databricksType: 'code',
+    disableSqlAutoDetect: true,
   };
 
   edit.set(notebook.uri, [
@@ -698,6 +703,43 @@ async function convertToPythonCell(
       vscode.commands.executeCommand('notebook.cell.edit');
     }
   }
+}
+
+/**
+ * Clear the disableSqlAutoDetect flag from cell metadata
+ * Called when content no longer starts with SQL keywords, allowing future auto-detect
+ * @param notebook - The notebook document
+ * @param cell - The cell to update
+ */
+async function clearDisableSqlAutoDetectFlag(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell
+): Promise<void> {
+  const cellIndex = cell.index;
+  const content = cell.document.getText();
+  const languageId = cell.document.languageId;
+
+  const edit = new vscode.WorkspaceEdit();
+
+  const cellData = new vscode.NotebookCellData(
+    vscode.NotebookCellKind.Code,
+    content,
+    languageId
+  );
+
+  // Copy metadata but remove the disableSqlAutoDetect flag
+  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
+  delete metadata.disableSqlAutoDetect;
+  cellData.metadata = metadata;
+
+  edit.set(notebook.uri, [
+    vscode.NotebookEdit.replaceCells(
+      new vscode.NotebookRange(cellIndex, cellIndex + 1),
+      [cellData]
+    )
+  ]);
+
+  await vscode.workspace.applyEdit(edit);
 }
 
 /**
@@ -741,8 +783,22 @@ function handleCellContentChange(
       }
     }
 
+    // Check if SQL auto-detect is disabled for this cell (user explicitly removed %sql)
+    const disableSqlAutoDetect = cell.metadata?.disableSqlAutoDetect === true;
+    const hasSqlKeywords = SQL_KEYWORDS_REGEX.test(content);
+
+    if (disableSqlAutoDetect) {
+      // If content no longer starts with SQL keywords (e.g., wrapped in spark.sql()),
+      // clear the flag to allow future auto-detect
+      if (!hasSqlKeywords) {
+        clearDisableSqlAutoDetectFlag(notebook, cell);
+      }
+      // Skip auto-detect while flag is set (user is editing the converted cell)
+      return;
+    }
+
     // Auto-detect SQL in Python cells (existing functionality)
-    if (SQL_KEYWORDS_REGEX.test(content)) {
+    if (hasSqlKeywords) {
       ensureMagicCommand(notebook, cell, '%sql', 'sql');
     }
   }

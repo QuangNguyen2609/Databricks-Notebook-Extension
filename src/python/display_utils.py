@@ -178,6 +178,49 @@ def html_escape(text):
         .replace("'", '&#39;'))
 
 
+def safe_str(value):
+    """Safely convert any value to a clean string for display.
+
+    Handles:
+    - None values
+    - Special float values (NaN, Infinity)
+    - Control characters and null bytes
+    - Invalid UTF-8 sequences
+    - Very long strings
+    """
+    try:
+        # Handle None
+        if value is None:
+            return None
+
+        # Handle special float values
+        if isinstance(value, float):
+            if value != value:  # NaN check
+                return 'NaN'
+            if value == float('inf'):
+                return 'Infinity'
+            if value == float('-inf'):
+                return '-Infinity'
+
+        # Convert to string
+        text = str(value)
+
+        # Remove null bytes and control characters (except newline, tab)
+        text = ''.join(c for c in text if c >= ' ' or c in '\n\t')
+
+        # Limit length to prevent buffer overflow
+        max_len = 10000
+        if len(text) > max_len:
+            text = text[:max_len] + '...'
+
+        # Ensure valid UTF-8
+        text = text.encode('utf-8', errors='replace').decode('utf-8')
+
+        return text
+    except Exception:
+        return '<unable to display>'
+
+
 def render_cell_value(value, is_string_type=False):
     """Render cell value with collapsible support for long strings.
 
@@ -187,7 +230,11 @@ def render_cell_value(value, is_string_type=False):
     if value is None:
         return '<span class="null-badge">null</span>'
 
-    display_value = str(value)
+    # Use safe_str() to handle problematic values (control chars, invalid UTF-8, etc.)
+    display_value = safe_str(value)
+    if display_value is None:
+        return '<span class="null-badge">null</span>'
+
     escaped_value = html_escape(display_value)
 
     # For string types, wrap in collapsible container (JS handles expand/collapse)
@@ -292,9 +339,13 @@ def spark_dataframe_to_html(df, limit=100, execution_time=None):
         for row in rows:
             html += '<tr>'
             for col in columns:
-                value = row[col]
-                is_string = 'string' in type_map.get(col, '')
-                cell_html = render_cell_value(value, is_string)
+                try:
+                    value = row[col]
+                    is_string = 'string' in type_map.get(col, '')
+                    cell_html = render_cell_value(value, is_string)
+                except Exception:
+                    # Gracefully handle any cell access or rendering errors
+                    cell_html = '<span class="null-badge">error</span>'
                 html += f'<td>{cell_html}</td>'
             html += '</tr>'
         html += '</tbody>'
@@ -363,14 +414,18 @@ def pandas_dataframe_to_html(df, limit=100, execution_time=None):
         for _, row in limited_df.iterrows():
             html += '<tr>'
             for col in columns:
-                val = row[col]
-                # Check for NaN
-                if val is None or (isinstance(val, float) and val != val):
-                    html += '<td><span class="null-badge">null</span></td>'
-                else:
-                    is_string = 'object' in type_map.get(col, '') or 'string' in type_map.get(col, '')
-                    cell_html = render_cell_value(val, is_string)
-                    html += f'<td>{cell_html}</td>'
+                try:
+                    val = row[col]
+                    # Check for NaN
+                    if val is None or (isinstance(val, float) and val != val):
+                        html += '<td><span class="null-badge">null</span></td>'
+                    else:
+                        is_string = 'object' in type_map.get(col, '') or 'string' in type_map.get(col, '')
+                        cell_html = render_cell_value(val, is_string)
+                        html += f'<td>{cell_html}</td>'
+                except Exception:
+                    # Gracefully handle any cell access or rendering errors
+                    html += '<td><span class="null-badge">error</span></td>'
             html += '</tr>'
         html += '</tbody>'
 

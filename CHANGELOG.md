@@ -5,6 +5,15 @@ All notable changes to the Databricks Notebook Viewer extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2025-12-05
+
+### Fixed
+- **SQL Auto-Detect Loop**: Fixed annoying issue where deleting `%sql` from a cell would cause it to immediately reappear when typing any character
+  - **Root Cause**: Cell replacement via `NotebookEdit.replaceCells` creates a new document URI, breaking the URI-based tracking mechanism (`autoDetectedCells` Set)
+  - **Solution**: Use persistent `disableSqlAutoDetect` metadata flag instead of URI-based tracking
+  - Flag is automatically cleared when content no longer starts with SQL keywords (e.g., after wrapping in `spark.sql()`)
+  - Allows normal auto-detect for fresh cells while preventing unwanted re-conversion of intentionally converted cells
+
 ## [0.3.4] - 2025-12-04
 
 ### Fixed

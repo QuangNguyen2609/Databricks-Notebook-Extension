@@ -40,6 +40,18 @@ interface KernelRequest {
 }
 
 /**
+ * Virtual environment info from Python kernel
+ */
+interface VenvInfo {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  is_venv: boolean;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  venv_path: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  venv_name: string | null;
+}
+
+/**
  * Response from the Python kernel
  */
 interface KernelResponse {
@@ -57,10 +69,22 @@ interface KernelResponse {
   // Python protocol uses snake_case
   // eslint-disable-next-line @typescript-eslint/naming-convention
   spark_status?: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  venv_info?: VenvInfo;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  databricks_connect_version?: string | null;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  databricks_connect_compatible?: boolean;
 }
 
 /** Last spark status from kernel initialization */
 let lastSparkStatus: string | undefined;
+
+/** Last venv info from kernel initialization */
+let lastVenvInfo: VenvInfo | undefined;
+
+/** Last databricks-connect version from kernel initialization */
+let lastDbConnectVersion: string | undefined;
 
 /**
  * Manages a persistent Python process for code execution
@@ -72,6 +96,7 @@ export class PersistentExecutor implements vscode.Disposable {
   private workingDirectory: string;
   private profileName: string | undefined;
   private isReady = false;
+  private debugMode = false;
   private pendingRequests = new Map<string, {
     resolve: (result: KernelResponse) => void;
     reject: (error: Error) => void;
@@ -109,10 +134,16 @@ export class PersistentExecutor implements vscode.Disposable {
 
     this._onDidChangeState.fire('starting');
 
-    console.debug(`[Executor] Starting Python process:`);
-    console.debug(`[Executor]   Python: ${this.pythonPath}`);
-    console.debug(`[Executor]   Script: ${this.kernelScriptPath}`);
-    console.debug(`[Executor]   CWD: ${this.workingDirectory}`);
+    // Check if debug mode is enabled via environment variable (developer-only)
+    // Set DATABRICKS_KERNEL_DEBUG=true to enable verbose logging
+    this.debugMode = process.env.DATABRICKS_KERNEL_DEBUG === 'true';
+
+    if (this.debugMode) {
+      console.debug(`[Executor] Starting Python process:`);
+      console.debug(`[Executor]   Python: ${this.pythonPath}`);
+      console.debug(`[Executor]   Script: ${this.kernelScriptPath}`);
+      console.debug(`[Executor]   CWD: ${this.workingDirectory}`);
+    }
 
     return new Promise((resolve) => {
       try {
@@ -120,6 +151,10 @@ export class PersistentExecutor implements vscode.Disposable {
         const env: NodeJS.ProcessEnv = { ...process.env };
         if (this.profileName) {
           env.DATABRICKS_CONFIG_PROFILE = this.profileName;
+        }
+        // Pass debug mode to Python kernel
+        if (this.debugMode) {
+          env.DATABRICKS_KERNEL_DEBUG = 'true';
         }
 
         this.process = cp.spawn(this.pythonPath, [this.kernelScriptPath], {
@@ -156,9 +191,13 @@ export class PersistentExecutor implements vscode.Disposable {
           this.process.stdout.resume();
         }
 
-        // Handle stderr
+        // Handle stderr - only log in debug mode or for non-debug messages
         this.process.stderr?.on('data', (data) => {
-          console.error('[Python Kernel stderr]:', data.toString());
+          const output = data.toString();
+          // Filter out kernel debug messages unless debug mode is enabled
+          if (this.debugMode || !output.includes('[KERNEL DEBUG]')) {
+            console.error('[Python Kernel stderr]:', output);
+          }
         });
 
         // Handle process errors
@@ -171,7 +210,9 @@ export class PersistentExecutor implements vscode.Disposable {
 
         // Handle process exit
         this.process.on('exit', (code, signal) => {
-          console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
+          if (this.debugMode) {
+            console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
+          }
           this._onDidChangeState.fire('stopped');
           this.cleanup();
           // If process exits before ready, resolve with false
@@ -218,16 +259,40 @@ export class PersistentExecutor implements vscode.Disposable {
       if (response.type === 'ready') {
         this.isReady = true;
         this._onDidChangeState.fire('ready');
-        // Log Python info (Python protocol uses snake_case)
+        // Log Python info (Python protocol uses snake_case) - only in debug mode
         // eslint-disable-next-line @typescript-eslint/naming-convention
-        if ((response as { python_info?: string }).python_info) {
+        if (this.debugMode && (response as { python_info?: string }).python_info) {
           // eslint-disable-next-line @typescript-eslint/naming-convention
           console.debug(`[Executor] ${(response as { python_info?: string }).python_info}`);
         }
+
+        // Store and log venv info
+        if (response.venv_info) {
+          lastVenvInfo = response.venv_info;
+          if (response.venv_info.is_venv) {
+            const venvName = response.venv_info.venv_name || 'venv';
+            if (this.debugMode) {
+              console.debug(`[Executor] Using virtual environment: ${venvName} (${response.venv_info.venv_path})`);
+            }
+            // Show informational message about venv
+            vscode.window.showInformationMessage(`Kernel: Using virtual environment "${venvName}"`);
+          }
+        }
+
+        // Store and log databricks-connect version
+        if (response.databricks_connect_version) {
+          lastDbConnectVersion = response.databricks_connect_version;
+          if (this.debugMode) {
+            console.debug(`[Executor] databricks-connect version: ${response.databricks_connect_version}`);
+          }
+        }
+
         // Store and log spark status
         if (response.spark_status) {
           lastSparkStatus = response.spark_status;
-          console.debug(`[Executor] ${response.spark_status}`);
+          if (this.debugMode) {
+            console.debug(`[Executor] ${response.spark_status}`);
+          }
           // Show notification for spark status
           if (response.spark_status.startsWith('OK:')) {
             vscode.window.showInformationMessage(`Kernel: ${response.spark_status}`);
@@ -254,6 +319,20 @@ export class PersistentExecutor implements vscode.Disposable {
    */
   static getLastSparkStatus(): string | undefined {
     return lastSparkStatus;
+  }
+
+  /**
+   * Get the last venv info from kernel initialization
+   */
+  static getLastVenvInfo(): VenvInfo | undefined {
+    return lastVenvInfo;
+  }
+
+  /**
+   * Get the last databricks-connect version from kernel initialization
+   */
+  static getLastDbConnectVersion(): string | undefined {
+    return lastDbConnectVersion;
   }
 
   /**

@@ -20,6 +20,10 @@ import urllib.parse
 DATABRICKS_CONFIG_FILE = '~/.databrickscfg'
 DATABRICKS_TOKEN_CACHE = '~/.databricks/token-cache.json'
 
+# Debug mode - only enabled when DATABRICKS_KERNEL_DEBUG=true
+# This prevents sensitive debug info from being logged in production
+DEBUG_MODE = os.environ.get('DATABRICKS_KERNEL_DEBUG', 'false').lower() == 'true'
+
 
 def get_local_timezone() -> timezone:
     """
@@ -44,7 +48,12 @@ def get_local_now() -> datetime:
 
 
 def log_debug(msg: str):
-    """Log debug message to stderr for kernel debugging."""
+    """
+    Log debug message to stderr for kernel debugging.
+    Only logs when DATABRICKS_KERNEL_DEBUG=true environment variable is set.
+    """
+    if not DEBUG_MODE:
+        return
     import sys
     print(f"[KERNEL DEBUG] {msg}", file=sys.stderr, flush=True)
 
