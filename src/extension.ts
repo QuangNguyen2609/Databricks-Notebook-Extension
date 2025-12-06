@@ -27,6 +27,12 @@ import {
   removeMagicFromContent,
   CellTransformResult,
 } from './utils/cellEditor';
+import {
+  findTextEditorTab,
+  findNotebookTab,
+  isInDiffTab,
+  replaceTabWithView,
+} from './utils/tabManager';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
@@ -241,26 +247,10 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
     }
   }
 
-  const uriString = fileUri.toString();
-
   // Open as notebook - close existing text editor first for unified tab experience
   try {
-    // Find the current text editor tab to get view column and close it
-    const tabInfo = findTextEditorTab(uriString);
-    const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
-    // Close the text editor tab first to avoid two tabs
-    if (tabInfo) {
-      await vscode.window.tabGroups.close(tabInfo.tab);
-    }
-
-    // Open notebook in the same view column
-    await vscode.commands.executeCommand(
-      'vscode.openWith',
-      fileUri,
-      'databricks-notebook',
-      viewColumn
-    );
+    const tabInfo = findTextEditorTab(fileUri.toString());
+    await replaceTabWithView(fileUri, tabInfo, 'databricks-notebook');
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to open notebook: ${error}`);
   }
@@ -285,24 +275,9 @@ async function openAsRawText(uri?: vscode.Uri): Promise<void> {
   // This is cleared when the text editor tab is closed
   viewingAsRawText.add(uriString);
 
-  // Find the current notebook tab to get view column
-  const tabInfo = findNotebookTab(uriString);
-  const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
   try {
-    // Close the notebook tab first (same pattern as openAsNotebook)
-    if (tabInfo) {
-      await vscode.window.tabGroups.close(tabInfo.tab);
-    }
-
-    // Open as default text editor
-    // Using 'default' as the editor ID opens with the standard text editor
-    await vscode.commands.executeCommand(
-      'vscode.openWith',
-      fileUri,
-      'default',
-      viewColumn
-    );
+    const tabInfo = findNotebookTab(uriString);
+    await replaceTabWithView(fileUri, tabInfo, 'default');
   } catch (error) {
     // Clean up on error
     viewingAsRawText.delete(uriString);
@@ -325,44 +300,6 @@ function isDatabricksNotebookSync(document: vscode.TextDocument): boolean {
 }
 
 /**
- * Find the tab and view column for a text document
- * @param uriString - The URI string of the document
- * @returns Object with tab and viewColumn, or null if not found
- */
-function findTextEditorTab(uriString: string): { tab: vscode.Tab; viewColumn: vscode.ViewColumn } | null {
-  for (const tabGroup of vscode.window.tabGroups.all) {
-    for (const tab of tabGroup.tabs) {
-      if (
-        tab.input instanceof vscode.TabInputText &&
-        tab.input.uri.toString() === uriString
-      ) {
-        return { tab, viewColumn: tabGroup.viewColumn };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Find the tab and view column for a notebook document
- * @param uriString - The URI string of the document
- * @returns Object with tab and viewColumn, or null if not found
- */
-function findNotebookTab(uriString: string): { tab: vscode.Tab; viewColumn: vscode.ViewColumn } | null {
-  for (const tabGroup of vscode.window.tabGroups.all) {
-    for (const tab of tabGroup.tabs) {
-      if (
-        tab.input instanceof vscode.TabInputNotebook &&
-        tab.input.uri.toString() === uriString
-      ) {
-        return { tab, viewColumn: tabGroup.viewColumn };
-      }
-    }
-  }
-  return null;
-}
-
-/**
  * Handle document open event to detect Databricks notebooks
  * Seamlessly replaces text editor with notebook view
  * @param document - The opened document
@@ -379,14 +316,7 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   }
 
   // Skip if opened in a diff editor tab
-  const isDiffTab = vscode.window.tabGroups.all.some(group =>
-    group.tabs.some(tab =>
-      (tab.input instanceof vscode.TabInputTextDiff || tab.input instanceof vscode.TabInputNotebookDiff) &&
-      (tab.input.original.toString() === document.uri.toString() ||
-       tab.input.modified.toString() === document.uri.toString())
-    )
-  );
-  if (isDiffTab) {
+  if (isInDiffTab(document.uri.toString())) {
     return;
   }
 
@@ -417,22 +347,9 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     processingDocuments.add(uriString);
 
     try {
-      // Find the current tab info before closing
+      // Use replaceTabWithView for unified close-then-open pattern
       const tabInfo = findTextEditorTab(uriString);
-      const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
-      // IMPORTANT: Close text editor FIRST to avoid two tabs being visible
-      if (tabInfo) {
-        await vscode.window.tabGroups.close(tabInfo.tab);
-      }
-
-      // Open notebook in the same view column
-      await vscode.commands.executeCommand(
-        'vscode.openWith',
-        document.uri,
-        'databricks-notebook',
-        viewColumn
-      );
+      await replaceTabWithView(document.uri, tabInfo, 'databricks-notebook');
     } finally {
       // Clear processing flag after a delay to handle any remaining events
       setTimeout(() => {
@@ -453,22 +370,9 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
       );
 
       if (action === 'Open as Notebook') {
-        // Find the current tab info
+        // Use replaceTabWithView for unified close-then-open pattern
         const tabInfo = findTextEditorTab(uriString);
-        const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
-        // Close text editor first
-        if (tabInfo) {
-          await vscode.window.tabGroups.close(tabInfo.tab);
-        }
-
-        // Open notebook
-        await vscode.commands.executeCommand(
-          'vscode.openWith',
-          document.uri,
-          'databricks-notebook',
-          viewColumn
-        );
+        await replaceTabWithView(document.uri, tabInfo, 'databricks-notebook');
       } else if (action === "Don't ask again") {
         await config.update('showNotification', false, vscode.ConfigurationTarget.Global);
       }
