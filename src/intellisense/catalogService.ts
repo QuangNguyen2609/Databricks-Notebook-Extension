@@ -12,6 +12,7 @@
  */
 
 import { PersistentExecutor } from '../kernels/persistentExecutor';
+import { RequestCache, FetchResult } from '../utils/requestCache';
 import { CatalogInfo, SchemaInfo, TableInfo, ColumnInfo } from './types';
 
 /**
@@ -29,62 +30,28 @@ interface ExecuteResult {
  * Service for fetching and caching Databricks catalog metadata
  */
 export class CatalogService {
-  // Default catalog (fetched once per session)
-  private defaultCatalog: string | null = null;
-  private defaultCatalogFetched = false;
-
-  // Default schema/database (fetched once per session)
-  private defaultSchema: string | null = null;
-  private defaultSchemaFetched = false;
-
-  // Cache - populated on first use, never refetched until clearCache()
-  private catalogCache: CatalogInfo[] | null = null;
-  private schemaCache = new Map<string, SchemaInfo[]>(); // key: catalogName
-  private tableCache = new Map<string, TableInfo[]>(); // key: catalog.schema
-  private columnCache = new Map<string, ColumnInfo[]>(); // key: catalog.schema.table
-
-  // Track in-flight requests to avoid duplicate queries
-  private pendingRequests = new Map<string, Promise<unknown>>();
+  // Request caches with deduplication for each data type
+  private _catalogsCache = new RequestCache<CatalogInfo[]>();
+  private _schemasCache = new RequestCache<SchemaInfo[]>();
+  private _tablesCache = new RequestCache<TableInfo[]>();
+  private _columnsCache = new RequestCache<ColumnInfo[]>();
+  private _defaultCatalogCache = new RequestCache<string | null>();
+  private _defaultSchemaCache = new RequestCache<string | null>();
 
   constructor(private getExecutor: () => PersistentExecutor | null) {}
-
-  /**
-   * Check if the executor is available and running
-   */
-  private isExecutorAvailable(): boolean {
-    const executor = this.getExecutor();
-    return executor !== null && executor.isRunning();
-  }
 
   /**
    * Get the default catalog (fetched once per session)
    * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getDefaultCatalog(): Promise<string | null> {
-    if (this.defaultCatalogFetched) {
-      return this.defaultCatalog;
-    }
-
-    const key = 'defaultCatalog';
-    if (this.pendingRequests.has(key)) {
-      await this.pendingRequests.get(key);
-      return this.defaultCatalog;
-    }
-
-    const promise = this.fetchDefaultCatalog();
-    this.pendingRequests.set(key, promise);
-
-    try {
-      const result = await promise;
-      // Only cache if executor was available (query was actually attempted)
-      if (result.executed) {
-        this.defaultCatalog = result.data as string | null;
-        this.defaultCatalogFetched = true;
-      }
-      return result.data as string | null;
-    } finally {
-      this.pendingRequests.delete(key);
-    }
+    return this._defaultCatalogCache.getOrFetch('default', async (): Promise<FetchResult<string | null>> => {
+      const result = await this.fetchDefaultCatalog();
+      return {
+        shouldCache: result.executed,
+        data: result.data as string | null,
+      };
+    });
   }
 
   /**
@@ -92,30 +59,13 @@ export class CatalogService {
    * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getDefaultSchema(): Promise<string | null> {
-    if (this.defaultSchemaFetched) {
-      return this.defaultSchema;
-    }
-
-    const key = 'defaultSchema';
-    if (this.pendingRequests.has(key)) {
-      await this.pendingRequests.get(key);
-      return this.defaultSchema;
-    }
-
-    const promise = this.fetchDefaultSchema();
-    this.pendingRequests.set(key, promise);
-
-    try {
-      const result = await promise;
-      // Only cache if executor was available (query was actually attempted)
-      if (result.executed) {
-        this.defaultSchema = result.data as string | null;
-        this.defaultSchemaFetched = true;
-      }
-      return result.data as string | null;
-    } finally {
-      this.pendingRequests.delete(key);
-    }
+    return this._defaultSchemaCache.getOrFetch('default', async (): Promise<FetchResult<string | null>> => {
+      const result = await this.fetchDefaultSchema();
+      return {
+        shouldCache: result.executed,
+        data: result.data as string | null,
+      };
+    });
   }
 
   /**
@@ -123,29 +73,13 @@ export class CatalogService {
    * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getCatalogs(): Promise<CatalogInfo[]> {
-    if (this.catalogCache !== null) {
-      return this.catalogCache;
-    }
-
-    const key = 'catalogs';
-    if (this.pendingRequests.has(key)) {
-      await this.pendingRequests.get(key);
-      return this.catalogCache || [];
-    }
-
-    const promise = this.fetchCatalogs();
-    this.pendingRequests.set(key, promise);
-
-    try {
-      const result = await promise;
-      // Only cache if executor was available (query was actually attempted)
-      if (result.executed) {
-        this.catalogCache = result.data as CatalogInfo[];
-      }
-      return (result.data as CatalogInfo[]) || [];
-    } finally {
-      this.pendingRequests.delete(key);
-    }
+    return this._catalogsCache.getOrFetch('catalogs', async (): Promise<FetchResult<CatalogInfo[]>> => {
+      const result = await this.fetchCatalogs();
+      return {
+        shouldCache: result.executed,
+        data: (result.data as CatalogInfo[]) || [],
+      };
+    });
   }
 
   /**
@@ -153,31 +87,13 @@ export class CatalogService {
    * Only caches result if executor was available - allows retry if executor wasn't ready
    */
   async getSchemas(catalogName: string): Promise<SchemaInfo[]> {
-    const cached = this.schemaCache.get(catalogName);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const key = `schemas:${catalogName}`;
-    if (this.pendingRequests.has(key)) {
-      await this.pendingRequests.get(key);
-      return this.schemaCache.get(catalogName) || [];
-    }
-
-    const promise = this.fetchSchemas(catalogName);
-    this.pendingRequests.set(key, promise);
-
-    try {
-      const result = await promise;
-      const schemas = (result.data as SchemaInfo[]) || [];
-      // Only cache if executor was available (query was actually attempted)
-      if (result.executed) {
-        this.schemaCache.set(catalogName, schemas);
-      }
-      return schemas;
-    } finally {
-      this.pendingRequests.delete(key);
-    }
+    return this._schemasCache.getOrFetch(catalogName, async (): Promise<FetchResult<SchemaInfo[]>> => {
+      const result = await this.fetchSchemas(catalogName);
+      return {
+        shouldCache: result.executed,
+        data: (result.data as SchemaInfo[]) || [],
+      };
+    });
   }
 
   /**
@@ -186,31 +102,13 @@ export class CatalogService {
    */
   async getTables(catalogName: string, schemaName: string): Promise<TableInfo[]> {
     const cacheKey = `${catalogName}.${schemaName}`;
-    const cached = this.tableCache.get(cacheKey);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const key = `tables:${cacheKey}`;
-    if (this.pendingRequests.has(key)) {
-      await this.pendingRequests.get(key);
-      return this.tableCache.get(cacheKey) || [];
-    }
-
-    const promise = this.fetchTables(catalogName, schemaName);
-    this.pendingRequests.set(key, promise);
-
-    try {
-      const result = await promise;
-      const tables = (result.data as TableInfo[]) || [];
-      // Only cache if executor was available (query was actually attempted)
-      if (result.executed) {
-        this.tableCache.set(cacheKey, tables);
-      }
-      return tables;
-    } finally {
-      this.pendingRequests.delete(key);
-    }
+    return this._tablesCache.getOrFetch(cacheKey, async (): Promise<FetchResult<TableInfo[]>> => {
+      const result = await this.fetchTables(catalogName, schemaName);
+      return {
+        shouldCache: result.executed,
+        data: (result.data as TableInfo[]) || [],
+      };
+    });
   }
 
   /**
@@ -223,31 +121,13 @@ export class CatalogService {
     tableName: string
   ): Promise<ColumnInfo[]> {
     const cacheKey = `${catalogName}.${schemaName}.${tableName}`;
-    const cached = this.columnCache.get(cacheKey);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const key = `columns:${cacheKey}`;
-    if (this.pendingRequests.has(key)) {
-      await this.pendingRequests.get(key);
-      return this.columnCache.get(cacheKey) || [];
-    }
-
-    const promise = this.fetchColumns(catalogName, schemaName, tableName);
-    this.pendingRequests.set(key, promise);
-
-    try {
-      const result = await promise;
-      const columns = (result.data as ColumnInfo[]) || [];
-      // Only cache if executor was available (query was actually attempted)
-      if (result.executed) {
-        this.columnCache.set(cacheKey, columns);
-      }
-      return columns;
-    } finally {
-      this.pendingRequests.delete(key);
-    }
+    return this._columnsCache.getOrFetch(cacheKey, async (): Promise<FetchResult<ColumnInfo[]>> => {
+      const result = await this.fetchColumns(catalogName, schemaName, tableName);
+      return {
+        shouldCache: result.executed,
+        data: (result.data as ColumnInfo[]) || [],
+      };
+    });
   }
 
   /**
@@ -275,15 +155,12 @@ export class CatalogService {
    * Clear all cached data (call on kernel restart)
    */
   clearCache(): void {
-    this.defaultCatalog = null;
-    this.defaultCatalogFetched = false;
-    this.defaultSchema = null;
-    this.defaultSchemaFetched = false;
-    this.catalogCache = null;
-    this.schemaCache.clear();
-    this.tableCache.clear();
-    this.columnCache.clear();
-    this.pendingRequests.clear();
+    this._defaultCatalogCache.clear();
+    this._defaultSchemaCache.clear();
+    this._catalogsCache.clear();
+    this._schemasCache.clear();
+    this._tablesCache.clear();
+    this._columnsCache.clear();
     console.log('[CatalogService] Cache cleared');
   }
 
