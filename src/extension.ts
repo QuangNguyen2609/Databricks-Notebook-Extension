@@ -13,6 +13,14 @@ import { CatalogService, SqlCompletionProvider, SqlContextParser } from './intel
 import { ProfileManager } from './databricks/profileManager';
 import { DatabricksStatusBar } from './databricks/statusBar';
 import { NotebookDiagnosticProvider } from './linting';
+import {
+  DATABRICKS_NOTEBOOK_HEADER,
+  LANGUAGE_TO_MAGIC,
+  SORTED_MAGIC_COMMANDS,
+  MAGIC_TO_CELL_TYPE,
+  SQL_KEYWORDS_REGEX,
+  contentStartsWithMagic,
+} from './constants';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
@@ -29,9 +37,6 @@ const processingDocuments = new Set<string>();
 // Track URIs currently being viewed as raw text (session-based)
 // This prevents auto-open from re-opening them as notebooks during the same session
 const viewingAsRawText = new Set<string>();
-
-// Databricks notebook header constant
-const DATABRICKS_HEADER = '# Databricks notebook source';
 
 /**
  * Extension activation
@@ -310,7 +315,7 @@ function isDatabricksNotebookSync(document: vscode.TextDocument): boolean {
     return false;
   }
   const firstLine = document.lineAt(0).text.trim();
-  return firstLine === DATABRICKS_HEADER;
+  return firstLine === DATABRICKS_NOTEBOOK_HEADER;
 }
 
 /**
@@ -470,47 +475,9 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   }
 }
 
-// SQL keywords that trigger auto-detection
-const SQL_KEYWORDS_REGEX = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|MERGE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE)\b/i;
-
 // Track cells that have been auto-detected to avoid repeated changes
 // Uses cell document URI which is stable across index changes
 const autoDetectedCells = new Set<string>();
-
-// Map language IDs to their required magic commands
-const LANGUAGE_TO_MAGIC: Record<string, string> = {
-  'sql': '%sql',
-  'scala': '%scala',
-  'r': '%r',
-  'shellscript': '%sh',
-};
-
-// Sorted magic commands by length (longest first) to prevent %r matching %run
-const SORTED_MAGIC_COMMANDS = Object.values(LANGUAGE_TO_MAGIC).sort(
-  (a, b) => b.length - a.length
-);
-
-/**
- * Check if content starts with a specific magic command
- * Ensures exact match (followed by whitespace, newline, or end of string)
- * to prevent %r matching %run
- */
-function contentStartsWithMagic(content: string, magic: string): boolean {
-  if (!content.startsWith(magic)) {
-    return false;
-  }
-  // Check that the magic command is complete (not a prefix of another command)
-  const afterMagic = content.substring(magic.length);
-  return afterMagic.length === 0 || /^[\s\n]/.test(afterMagic);
-}
-
-// Map magic commands to Databricks cell types
-const MAGIC_TO_TYPE: Record<string, string> = {
-  '%sql': 'sql',
-  '%scala': 'scala',
-  '%r': 'r',
-  '%sh': 'shell',
-};
 
 /**
  * Ensure a cell has the required magic command in its content
@@ -552,7 +519,7 @@ async function ensureMagicCommand(
 
   cellData.metadata = {
     ...metadata,
-    databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
+    databricksType: MAGIC_TO_CELL_TYPE[magicCommand] || 'code',
   };
 
   edit.set(notebook.uri, [
@@ -702,7 +669,7 @@ async function convertCellToLanguage(
   delete metadata.disableSqlAutoDetect;
   cellData.metadata = {
     ...metadata,
-    databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
+    databricksType: MAGIC_TO_CELL_TYPE[magicCommand] || 'code',
   };
 
   edit.set(notebook.uri, [

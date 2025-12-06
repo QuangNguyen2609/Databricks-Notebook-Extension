@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { parseNotebook, serializeNotebook, isDatabricksNotebook } from './parser';
 import { DatabricksCell, CellType } from './types';
+import { SQL_KEYWORDS_REGEX } from './constants';
 
 /**
  * Serializer for Databricks notebooks
@@ -110,8 +111,7 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
 
     // Auto-detect SQL from content (SELECT, INSERT, UPDATE, DELETE, etc.)
     const trimmedContent = content.trim();
-    const sqlKeywords = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|MERGE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE)\b/i;
-    if (languageId === 'python' && sqlKeywords.test(trimmedContent)) {
+    if (languageId === 'python' && SQL_KEYWORDS_REGEX.test(trimmedContent)) {
       return 'sql';
     }
 
