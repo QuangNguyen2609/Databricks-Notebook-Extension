@@ -380,7 +380,14 @@ Commands are sorted by length (longest first) to prevent `%r` from matching befo
 
 ## Version History
 
-### v0.3.4 (Current)
+### v0.3.5 (Current)
+- **SQL Auto-Detect Fix**: Fixed annoying issue where deleting `%sql` from a cell would cause it to immediately reappear when typing
+  - Root cause: Cell replacement creates new document URI, breaking the tracking mechanism
+  - Solution: Use persistent `disableSqlAutoDetect` metadata flag instead of URI-based tracking
+  - Flag is automatically cleared when content no longer starts with SQL keywords (e.g., after wrapping in `spark.sql()`)
+  - Allows normal auto-detect for fresh cells while preventing unwanted re-conversion
+
+### v0.3.4
 - **IntelliSense Reliability Fix**: Fixed critical issues causing SQL autocomplete to work inconsistently
   - Executor now auto-starts when kernel is selected (no need to run a cell first)
   - Failed metadata queries are no longer cached, allowing automatic retry

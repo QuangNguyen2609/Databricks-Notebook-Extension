@@ -128,9 +128,12 @@ export class KernelManager implements vscode.Disposable {
       }
     }
 
-    // Create controllers for new environments
-    for (const env of environments) {
-      if (!this.controllers.has(env.id)) {
+    // Create controllers for new environments in parallel
+    const newEnvironments = environments.filter(env => !this.controllers.has(env.id));
+
+    if (newEnvironments.length > 0) {
+      // Create all controllers concurrently
+      const controllerPromises = newEnvironments.map(env => {
         console.debug(`[KernelManager] Creating controller for: ${env.displayName} (${env.path})`);
 
         // Create profile provider function if ProfileManager exists
@@ -138,13 +141,23 @@ export class KernelManager implements vscode.Disposable {
           ? () => this.profileManager?.getSelectedProfileName() ?? undefined
           : undefined;
 
-        const controller = new PythonKernelController(
-          env,
-          this.notebookType,
-          this.extensionPath,
-          profileProvider
-        );
-        this.controllers.set(env.id, controller);
+        // Wrap in Promise.resolve for potential future async initialization
+        return Promise.resolve({
+          envId: env.id,
+          controller: new PythonKernelController(
+            env,
+            this.notebookType,
+            this.extensionPath,
+            profileProvider
+          )
+        });
+      });
+
+      const newControllers = await Promise.all(controllerPromises);
+
+      // Add all new controllers to the map
+      for (const { envId, controller } of newControllers) {
+        this.controllers.set(envId, controller);
       }
     }
 
@@ -213,7 +226,15 @@ export class KernelManager implements vscode.Disposable {
         }
       }
     }
-    await Promise.all(updatePromises);
+
+    const results = await Promise.allSettled(updatePromises);
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.error('[KernelManager] Some kernel restarts failed:', failures.map(f => f.reason));
+      vscode.window.showWarningMessage(
+        `${failures.length} kernel(s) failed to restart after profile change`
+      );
+    }
   }
 
   /**

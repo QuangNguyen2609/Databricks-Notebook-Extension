@@ -35,6 +35,60 @@ _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
 _display_outputs = []
 
 
+def get_venv_info():
+    """
+    Detect if running in a virtual environment and return info about it.
+    Returns dict with venv_path, venv_name, and is_venv flag.
+    """
+    venv_path = os.environ.get('VIRTUAL_ENV', '')
+    is_venv = bool(venv_path)
+    venv_name = os.path.basename(venv_path) if venv_path else None
+
+    return {
+        'is_venv': is_venv,
+        'venv_path': venv_path,
+        'venv_name': venv_name,
+    }
+
+
+def get_databricks_connect_version():
+    """
+    Get the installed databricks-connect version.
+    Returns version string or None if not installed.
+    """
+    try:
+        import importlib.metadata
+        version = importlib.metadata.version('databricks-connect')
+        return version
+    except Exception:
+        return None
+
+
+def check_databricks_connect_compatibility():
+    """
+    Check if databricks-connect version is compatible with serverless.
+    Returns tuple of (is_compatible, version, warning_message).
+    """
+    version = get_databricks_connect_version()
+    if version is None:
+        return (False, None, "databricks-connect not installed")
+
+    try:
+        # Parse major.minor version
+        parts = version.split('.')
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+
+        # Version 17.3+ does not support serverless
+        if major > 17 or (major == 17 and minor >= 3):
+            return (False, version, f"databricks-connect {version} does not support serverless. Please use version 17.2 or earlier: pip install 'databricks-connect<=17.2'")
+
+        return (True, version, None)
+    except (ValueError, IndexError):
+        # Can't parse version, assume compatible
+        return (True, version, None)
+
+
 def display(*args):
     """
     Display function that mimics Databricks display().
@@ -79,7 +133,6 @@ def initialize_spark_session():
                 return f"OK: Databricks Connect initialized (profile: {profile})"
             except Exception as e:
                 log_debug(f"Profile auth failed: {e}")
-                log_debug(f"Full traceback:\n{traceback.format_exc()}")
                 errors.append(f"Profile failed: {e}")
         elif auth_type == 'databricks-cli':
             log_debug("Profile uses databricks-cli auth, will use token cache directly")
@@ -239,19 +292,33 @@ def main():
     # Log Python info for debugging
     python_info = f"Python {_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro} at {_sys.executable}"
 
+    # Get virtual environment info
+    venv_info = get_venv_info()
+
+    # Check databricks-connect compatibility
+    db_compatible, db_version, db_warning = check_databricks_connect_compatibility()
+
     # Add display() function to namespace
     _namespace['display'] = display
 
-    # Initialize Spark session if available
-    spark_status = initialize_spark_session()
+    # Initialize Spark session if available (skip if incompatible version)
+    spark_status = None
+    if db_compatible:
+        spark_status = initialize_spark_session()
+    elif db_warning:
+        spark_status = f"WARN: {db_warning}"
 
-    # Send ready signal with spark status
-    print(json.dumps({
+    # Send ready signal with spark status and environment info
+    ready_signal = {
         'type': 'ready',
         'version': '1.0',
         'python_info': python_info,
-        'spark_status': spark_status
-    }), flush=True)
+        'spark_status': spark_status,
+        'venv_info': venv_info,
+        'databricks_connect_version': db_version,
+        'databricks_connect_compatible': db_compatible,
+    }
+    print(json.dumps(ready_signal), flush=True)
 
     for line in sys.stdin:
         line = line.strip()
@@ -277,7 +344,21 @@ def main():
 
             result['id'] = request_id
             result['type'] = 'result'
-            print(json.dumps(result), flush=True)
+            # Use ensure_ascii=True and default=str to handle non-serializable values
+            try:
+                output = json.dumps(result, ensure_ascii=True, default=str)
+                print(output, flush=True)
+            except Exception as json_err:
+                # Fallback: return error without display data if serialization fails
+                fallback_result = {
+                    'id': request_id,
+                    'type': 'result',
+                    'success': False,
+                    'error': f'JSON serialization failed: {str(json_err)}',
+                    'stdout': result.get('stdout', ''),
+                    'stderr': result.get('stderr', ''),
+                }
+                print(json.dumps(fallback_result, ensure_ascii=True), flush=True)
 
         except json.JSONDecodeError as e:
             error_result = {

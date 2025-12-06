@@ -38,12 +38,20 @@ export class ProfileManager implements vscode.Disposable {
         new vscode.RelativePattern(configDir, '.databrickscfg')
       );
 
-      this.fileWatcher.onDidChange(() => {
-        this.loadProfiles();
+      this.fileWatcher.onDidChange(async () => {
+        try {
+          await this.loadProfiles();
+        } catch (error) {
+          console.error('Failed to reload profiles on file change:', error);
+        }
       });
 
-      this.fileWatcher.onDidCreate(() => {
-        this.loadProfiles();
+      this.fileWatcher.onDidCreate(async () => {
+        try {
+          await this.loadProfiles();
+        } catch (error) {
+          console.error('Failed to load profiles on file creation:', error);
+        }
       });
 
       this.fileWatcher.onDidDelete(() => {
@@ -58,13 +66,8 @@ export class ProfileManager implements vscode.Disposable {
   async loadProfiles(): Promise<void> {
     this.profiles.clear();
 
-    if (!fs.existsSync(this.configPath)) {
-      this._onDidChangeProfiles.fire();
-      return;
-    }
-
     try {
-      const content = fs.readFileSync(this.configPath, 'utf-8');
+      const content = await fs.promises.readFile(this.configPath, 'utf-8');
       this.parseConfigFile(content);
 
       // Load persisted profile selection
@@ -84,6 +87,11 @@ export class ProfileManager implements vscode.Disposable {
 
       this._onDidChangeProfiles.fire();
     } catch (error) {
+      // Handle ENOENT (file doesn't exist) gracefully
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this._onDidChangeProfiles.fire();
+        return;
+      }
       console.error('Failed to load Databricks profiles:', error);
       vscode.window.showErrorMessage(`Failed to load Databricks profiles: ${error}`);
     }
