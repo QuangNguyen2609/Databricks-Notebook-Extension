@@ -5,6 +5,20 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2025-12-06
+
+### Added
+- **Kernel Controls**: Restart and interrupt buttons in notebook toolbar with proper VS Code integration
+
+- **spark/dbutils IntelliSense**: Comprehensive code completion for Databricks objects
+  - **spark completions**: Live completions queried from kernel (sql, table, read, createDataFrame, etc.) with static fallback
+  - **dbutils completions**: Full type stubs for all modules (fs, notebook, secrets, widgets) with method signatures
+  - **DataFrame completions**: 45+ common DataFrame methods (select, filter, groupBy, join, show, collect, etc.)
+  - Method documentation shows signatures on hover
+  - Caching for performance with auto-clear on kernel restart
+
+- **Linting Improvements**: Enhanced type stubs in virtual document preamble
+
 ## [0.3.6] - 2025-12-05
 
 ### Refactor

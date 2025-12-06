@@ -472,11 +472,33 @@ export class PersistentExecutor implements vscode.Disposable {
   }
 
   /**
-   * Interrupt current execution
+   * Interrupt current execution.
+   * Sends SIGINT to the Python process AND immediately resolves any pending
+   * execution requests with a KeyboardInterrupt error to ensure the UI updates
+   * without waiting for the Python process to respond.
    */
   interrupt(): void {
     if (this._process) {
+      // Send SIGINT to Python process
       this._process.kill('SIGINT');
+
+      // Immediately resolve all pending execution requests with KeyboardInterrupt
+      // This ensures the UI updates immediately without waiting for Python to respond
+      for (const [id, pending] of this._pendingRequests) {
+        if (id.startsWith('exec-')) {
+          clearTimeout(pending.timeout);
+          this._pendingRequests.delete(id);
+          // Resolve (not reject) with KeyboardInterrupt so the cell shows "interrupted"
+          pending.resolve({
+            type: 'result',
+            success: false,
+            stdout: '',
+            stderr: '',
+            error: 'Execution interrupted',
+            errorType: 'KeyboardInterrupt',
+          });
+        }
+      }
     }
   }
 

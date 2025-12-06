@@ -9,7 +9,7 @@
 import * as vscode from 'vscode';
 import { DatabricksNotebookSerializer, checkIsDatabricksNotebook } from './serializer';
 import { KernelManager } from './kernels';
-import { CatalogService, SqlCompletionProvider, SqlContextParser } from './intellisense';
+import { CatalogService, SqlCompletionProvider, SqlContextParser, PythonCompletionProvider } from './intellisense';
 import { ProfileManager } from './databricks/profileManager';
 import { DatabricksStatusBar } from './databricks/statusBar';
 import { NotebookDiagnosticProvider } from './linting';
@@ -37,6 +37,7 @@ import {
   replaceTabWithView,
 } from './utils/tabManager';
 import { sessionState } from './utils/sessionState';
+import { showInfoMessage, showErrorMessage } from './utils/notifications';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
@@ -112,7 +113,7 @@ function initializeStatusBar(
 }
 
 /**
- * Initialize SQL intellisense providers and catalog service.
+ * Initialize SQL and Python intellisense providers and catalog service.
  * @param context - The extension context
  * @param km - The kernel manager
  * @returns The initialized catalog service
@@ -124,9 +125,15 @@ function initializeIntellisenseProviders(
   // Initialize SQL intellisense for catalog/schema/table completion
   const cs = new CatalogService(() => km.getActiveExecutor() ?? null);
 
-  // Register kernel-related commands (with callback to clear catalog cache on restart)
+  // Initialize Python completion provider for spark/dbutils
+  const pythonCompletionProvider = new PythonCompletionProvider(
+    () => km.getActiveExecutor() ?? null
+  );
+
+  // Register kernel-related commands (with callback to clear caches on restart)
   km.registerCommands(context, () => {
     cs.clearCache();
+    pythonCompletionProvider.clearCache();
   });
 
   const sqlParser = new SqlContextParser();
@@ -138,6 +145,15 @@ function initializeIntellisenseProviders(
       { language: 'sql', scheme: 'vscode-notebook-cell' },
       sqlCompletionProvider,
       '.' // Trigger on dot for schema.table completion
+    )
+  );
+
+  // Register completion provider for Python in notebook cells (spark/dbutils)
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'python', scheme: 'vscode-notebook-cell' },
+      pythonCompletionProvider,
+      '.' // Trigger on dot for spark. and dbutils.
     )
   );
 
@@ -174,7 +190,7 @@ function registerProfileCommands(
     }),
     vscode.commands.registerCommand('databricks-notebook.refreshProfiles', async () => {
       await pm.loadProfiles();
-      vscode.window.showInformationMessage('Databricks profiles refreshed');
+      showInfoMessage('Databricks profiles refreshed');
     })
   );
 }
@@ -192,7 +208,7 @@ function registerNotebookCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('databricks-notebook.refreshCatalogCache', () => {
       cs.clearCache();
-      vscode.window.showInformationMessage('Catalog cache cleared. Will refresh on next completion.');
+      showInfoMessage('Catalog cache cleared. Will refresh on next completion.');
     })
   );
 
@@ -302,7 +318,7 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
   const fileUri = uri || vscode.window.activeTextEditor?.document.uri;
 
   if (!fileUri) {
-    vscode.window.showErrorMessage('No file selected');
+    showErrorMessage('No file selected');
     return;
   }
 
@@ -310,6 +326,7 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
   const isDatabricks = await checkIsDatabricksNotebook(fileUri);
 
   if (!isDatabricks) {
+    // Keep as standard notification since it has action buttons
     const result = await vscode.window.showWarningMessage(
       'This file does not appear to be a Databricks notebook. Open anyway?',
       'Yes',
@@ -325,7 +342,7 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
     const tabInfo = findTextEditorTab(fileUri.toString());
     await replaceTabWithView(fileUri, tabInfo, 'databricks-notebook');
   } catch (error) {
-    vscode.window.showErrorMessage(`Failed to open notebook: ${error}`);
+    showErrorMessage(`Failed to open notebook: ${error}`);
   }
 }
 
@@ -338,7 +355,7 @@ async function openAsRawText(uri?: vscode.Uri): Promise<void> {
   const fileUri = uri || vscode.window.activeNotebookEditor?.notebook.uri;
 
   if (!fileUri) {
-    vscode.window.showErrorMessage('No notebook selected');
+    showErrorMessage('No notebook selected');
     return;
   }
 
@@ -354,7 +371,7 @@ async function openAsRawText(uri?: vscode.Uri): Promise<void> {
   } catch (error) {
     // Clean up on error
     sessionState.clearRawTextView(uriString);
-    vscode.window.showErrorMessage(`Failed to open as text: ${error}`);
+    showErrorMessage(`Failed to open as text: ${error}`);
   }
 }
 
@@ -667,9 +684,7 @@ async function showProfileQuickPick(manager: ProfileManager): Promise<void> {
   const profiles = manager.getAllProfiles();
 
   if (profiles.length === 0) {
-    vscode.window.showInformationMessage(
-      'No Databricks profiles found in ~/.databrickscfg. Run "databricks auth login" to configure authentication.'
-    );
+    showInfoMessage('No Databricks profiles found in ~/.databrickscfg. Run "databricks auth login" to configure.');
     return;
   }
 
@@ -699,7 +714,7 @@ async function showProfileQuickPick(manager: ProfileManager): Promise<void> {
     await manager.selectProfile(selected.profileName);
   } else if (selected?.label.includes('Refresh')) {
     await manager.loadProfiles();
-    vscode.window.showInformationMessage('Databricks profiles refreshed');
+    showInfoMessage('Databricks profiles refreshed');
   }
 }
 
