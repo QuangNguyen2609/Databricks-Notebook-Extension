@@ -215,7 +215,9 @@ describe('PersistentExecutor Tests', () => {
 
       let stateReceived: string | null = null;
       executor.onDidChangeState((state) => {
-        if (!stateReceived) stateReceived = state;
+        if (!stateReceived) {
+          stateReceived = state;
+        }
       });
 
       executor.start();

@@ -82,6 +82,7 @@ describe("cellOperations", () => {
     });
 
     // Load the module with mocks active - use require() to load at runtime
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const cellOps = require("../utils/cellOperations");
     ensureMagicCommand = cellOps.ensureMagicCommand;
     handleNewCell = cellOps.handleNewCell;

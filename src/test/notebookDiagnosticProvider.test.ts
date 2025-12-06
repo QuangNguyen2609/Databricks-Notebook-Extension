@@ -127,7 +127,7 @@ describe("NotebookDiagnosticProvider", () => {
 
     // Clear cache and require fresh
     clearModuleCache();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const { NotebookDiagnosticProvider } = require("../linting/notebookDiagnosticProvider");
 
     assert.throws(
@@ -187,7 +187,7 @@ describe("NotebookDiagnosticProvider", () => {
 
     // Clear cache and require fresh
     clearModuleCache();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const { NotebookDiagnosticProvider } = require("../linting/notebookDiagnosticProvider");
 
     const provider = new NotebookDiagnosticProvider({
