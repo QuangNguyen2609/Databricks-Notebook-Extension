@@ -1,5 +1,5 @@
 /**
- * Type definitions for Databricks Notebook Viewer
+ * Type definitions for Databricks Notebook Studio
  */
 
 /**

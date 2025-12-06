@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build script for Databricks Notebook Viewer VS Code extension
+# Build script for Databricks Notebook Studio VS Code extension
 
 set -e
 

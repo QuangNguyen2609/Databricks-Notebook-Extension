@@ -14,18 +14,19 @@ import {
   wrapShellCode as wrapShellCodeUtil,
   stripMagicPrefix as stripMagicPrefixUtil,
 } from '../utils/codeTransform';
+import { extractErrorMessage } from '../utils/errorHandler';
 
 /**
  * NotebookController for a specific Python interpreter
  */
 export class PythonKernelController implements vscode.Disposable {
-  private readonly controller: vscode.NotebookController;
-  public executor: PersistentExecutor | null = null;
-  private executionOrder = 0;
-  private outputHandler: OutputHandler;
-  private disposables: vscode.Disposable[] = [];
-  private isExecuting = false;
-  private profileProvider: (() => string | undefined) | undefined;
+  private readonly _controller: vscode.NotebookController;
+  private _executor: PersistentExecutor | null = null;
+  private _executionOrder = 0;
+  private _outputHandler: OutputHandler;
+  private _disposables: vscode.Disposable[] = [];
+  private _isExecuting = false;
+  private _profileProvider: (() => string | undefined) | undefined;
 
   /**
    * Create a new PythonKernelController
@@ -36,33 +37,33 @@ export class PythonKernelController implements vscode.Disposable {
    * @param profileProvider - Optional function to get the current Databricks profile name
    */
   constructor(
-    private readonly environment: PythonEnvironment,
+    private readonly _environment: PythonEnvironment,
     notebookType: string,
-    private readonly extensionPath: string,
+    private readonly _extensionPath: string,
     profileProvider?: () => string | undefined
   ) {
-    this.profileProvider = profileProvider;
-    const controllerId = `databricks-python-${this.sanitizeId(environment.id)}`;
+    this._profileProvider = profileProvider;
+    const controllerId = `databricks-python-${this.generateControllerId(_environment.id)}`;
 
-    this.controller = vscode.notebooks.createNotebookController(
+    this._controller = vscode.notebooks.createNotebookController(
       controllerId,
       notebookType,
-      this.createLabel(environment)
+      this.createLabel(_environment)
     );
 
-    this.controller.supportedLanguages = ['python', 'sql', 'scala', 'r', 'shellscript', 'markdown'];
-    this.controller.supportsExecutionOrder = true;
-    this.controller.description = environment.version
-      ? `Python ${environment.version}`
-      : environment.envType || 'Python';
-    this.controller.detail = environment.path;
-    this.controller.executeHandler = this.executeHandler.bind(this);
+    this._controller.supportedLanguages = ['python', 'sql', 'scala', 'r', 'shellscript', 'markdown'];
+    this._controller.supportsExecutionOrder = true;
+    this._controller.description = _environment.version
+      ? `Python ${_environment.version}`
+      : _environment.envType || 'Python';
+    this._controller.detail = _environment.path;
+    this._controller.executeHandler = this.executeHandler.bind(this);
 
-    this.outputHandler = new OutputHandler();
+    this._outputHandler = new OutputHandler();
 
     // Track when this controller is selected and initialize executor
-    this.disposables.push(
-      this.controller.onDidChangeSelectedNotebooks((event) => {
+    this._disposables.push(
+      this._controller.onDidChangeSelectedNotebooks((event) => {
         if (event.selected) {
           console.debug(`[Kernel] Controller selected for: ${event.notebook.uri.toString()}`);
           // Initialize and start executor on kernel selection so intellisense works before first cell execution
@@ -76,10 +77,14 @@ export class PythonKernelController implements vscode.Disposable {
   }
 
   /**
-   * Sanitize ID for use in controller ID
-   * Uses a hash of the full path to ensure uniqueness
+   * Generate a unique controller ID from an environment path.
+   * Uses a hash of the full path to ensure uniqueness while keeping
+   * readable prefix for debugging.
+   *
+   * @param id - The environment ID (typically a file path)
+   * @returns A sanitized, unique controller ID string
    */
-  private sanitizeId(id: string): string {
+  private generateControllerId(id: string): string {
     // Create a simple hash of the full path to ensure uniqueness
     let hash = 0;
     for (let i = 0; i < id.length; i++) {
@@ -116,14 +121,14 @@ export class PythonKernelController implements vscode.Disposable {
    * Get the underlying VS Code controller
    */
   getController(): vscode.NotebookController {
-    return this.controller;
+    return this._controller;
   }
 
   /**
    * Get the Python environment for this controller
    */
   getEnvironment(): PythonEnvironment {
-    return this.environment;
+    return this._environment;
   }
 
   /**
@@ -147,8 +152,8 @@ export class PythonKernelController implements vscode.Disposable {
     cell: vscode.NotebookCell,
     notebook: vscode.NotebookDocument
   ): Promise<void> {
-    const execution = this.controller.createNotebookCellExecution(cell);
-    execution.executionOrder = ++this.executionOrder;
+    const execution = this._controller.createNotebookCellExecution(cell);
+    execution.executionOrder = ++this._executionOrder;
     execution.start(Date.now());
 
     try {
@@ -178,12 +183,12 @@ export class PythonKernelController implements vscode.Disposable {
       }
 
       // Get or create executor
-      if (!this.executor) {
-        const profileName = this.profileProvider?.();
-        console.debug(`[Kernel] Creating executor with Python: ${this.environment.path}, profile: ${profileName || 'none'}`);
-        this.executor = new PersistentExecutor(
-          this.environment.path,
-          this.extensionPath,
+      if (!this._executor) {
+        const profileName = this._profileProvider?.();
+        console.debug(`[Kernel] Creating executor with Python: ${this._environment.path}, profile: ${profileName || 'none'}`);
+        this._executor = new PersistentExecutor(
+          this._environment.path,
+          this._extensionPath,
           this.getWorkingDirectory(notebook),
           profileName
         );
@@ -206,20 +211,19 @@ export class PythonKernelController implements vscode.Disposable {
       }
 
       // Execute the code
-      this.isExecuting = true;
-      const result = await this.executor.execute(executableCode);
-      this.isExecuting = false;
+      this._isExecuting = true;
+      const result = await this._executor.execute(executableCode);
+      this._isExecuting = false;
 
       // Convert result to notebook outputs
-      const outputs = this.outputHandler.convertResult(result);
+      const outputs = this._outputHandler.convertResult(result);
       execution.replaceOutput(outputs);
 
       execution.end(result.success, Date.now());
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       execution.replaceOutput([
         new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.error(new Error(errorMessage))
+          vscode.NotebookCellOutputItem.error(new Error(extractErrorMessage(error)))
         ])
       ]);
       execution.end(false, Date.now());
@@ -270,7 +274,7 @@ export class PythonKernelController implements vscode.Disposable {
   private async handleNonPythonCell(
     execution: vscode.NotebookCellExecution,
     languageId: string,
-    code: string,
+    _code: string,
     cell: vscode.NotebookCell
   ): Promise<void> {
     // Check for Databricks cell type from metadata
@@ -295,7 +299,7 @@ export class PythonKernelController implements vscode.Disposable {
     const key = databricksType || languageId;
     const message = messages[key] || `${languageId} cells are not supported for local execution.`;
 
-    const output = this.outputHandler.createInfoOutput(message);
+    const output = this._outputHandler.createInfoOutput(message);
     execution.replaceOutput([output]);
     execution.end(true, Date.now());
   }
@@ -304,8 +308,8 @@ export class PythonKernelController implements vscode.Disposable {
    * Interrupt current execution
    */
   interrupt(): void {
-    if (this.executor && this.isExecuting) {
-      this.executor.interrupt();
+    if (this._executor && this._isExecuting) {
+      this._executor.interrupt();
     }
   }
 
@@ -313,8 +317,8 @@ export class PythonKernelController implements vscode.Disposable {
    * Restart the kernel (reset namespace)
    */
   async restart(): Promise<boolean> {
-    if (this.executor) {
-      return this.executor.restart();
+    if (this._executor) {
+      return this._executor.restart();
     }
     return true;
   }
@@ -323,8 +327,8 @@ export class PythonKernelController implements vscode.Disposable {
    * Reset the kernel namespace without restarting
    */
   async resetNamespace(): Promise<boolean> {
-    if (this.executor) {
-      return this.executor.reset();
+    if (this._executor) {
+      return this._executor.reset();
     }
     return true;
   }
@@ -333,8 +337,8 @@ export class PythonKernelController implements vscode.Disposable {
    * Get variables in the namespace
    */
   async getVariables(): Promise<Record<string, { type: string; repr: string }>> {
-    if (this.executor) {
-      return this.executor.getVariables();
+    if (this._executor) {
+      return this._executor.getVariables();
     }
     return {};
   }
@@ -343,7 +347,7 @@ export class PythonKernelController implements vscode.Disposable {
    * Check if kernel is running
    */
   isRunning(): boolean {
-    return this.executor?.isRunning() ?? false;
+    return this._executor?.isRunning() ?? false;
   }
 
   /**
@@ -352,21 +356,21 @@ export class PythonKernelController implements vscode.Disposable {
    * IntelliSense queries can be executed immediately after kernel selection.
    */
   async ensureExecutor(notebook: vscode.NotebookDocument): Promise<void> {
-    if (!this.executor) {
-      const profileName = this.profileProvider?.();
-      console.debug(`[Kernel] Creating executor for intellisense: ${this.environment.path}, profile: ${profileName || 'none'}`);
-      this.executor = new PersistentExecutor(
-        this.environment.path,
-        this.extensionPath,
+    if (!this._executor) {
+      const profileName = this._profileProvider?.();
+      console.debug(`[Kernel] Creating executor for intellisense: ${this._environment.path}, profile: ${profileName || 'none'}`);
+      this._executor = new PersistentExecutor(
+        this._environment.path,
+        this._extensionPath,
         this.getWorkingDirectory(notebook),
         profileName
       );
     }
 
     // Actually start the executor so IntelliSense works before first cell execution
-    if (!this.executor.isRunning()) {
+    if (!this._executor.isRunning()) {
       console.debug(`[Kernel] Starting executor for intellisense...`);
-      const started = await this.executor.start();
+      const started = await this._executor.start();
       if (started) {
         console.debug(`[Kernel] Executor started successfully for intellisense`);
       } else {
@@ -379,15 +383,36 @@ export class PythonKernelController implements vscode.Disposable {
    * Get the executor instance (for intellisense providers)
    */
   getExecutor(): PersistentExecutor | null {
-    return this.executor;
+    return this._executor;
+  }
+
+  /**
+   * Clear and dispose the executor.
+   * Used when profile changes to force recreation with new settings.
+   */
+  clearExecutor(): void {
+    if (this._executor) {
+      this._executor.dispose();
+      this._executor = null;
+    }
+  }
+
+  /**
+   * Update the executor's profile and restart if running.
+   * @param profileName - The new Databricks profile name
+   */
+  async setExecutorProfile(profileName: string | undefined): Promise<void> {
+    if (this._executor) {
+      await this._executor.setProfile(profileName);
+    }
   }
 
   /**
    * Dispose of resources
    */
   dispose(): void {
-    this.executor?.dispose();
-    this.controller.dispose();
-    this.disposables.forEach(d => d.dispose());
+    this._executor?.dispose();
+    this._controller.dispose();
+    this._disposables.forEach(d => d.dispose());
   }
 }

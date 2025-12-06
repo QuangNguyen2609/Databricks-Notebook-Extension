@@ -1,5 +1,5 @@
 /**
- * Databricks Notebook Viewer - VS Code Extension
+ * Databricks Notebook Studio - VS Code Extension
  *
  * This extension provides notebook visualization for Databricks .py files,
  * rendering them with proper cell separation, markdown rendering, and
@@ -13,6 +13,30 @@ import { CatalogService, SqlCompletionProvider, SqlContextParser } from './intel
 import { ProfileManager } from './databricks/profileManager';
 import { DatabricksStatusBar } from './databricks/statusBar';
 import { NotebookDiagnosticProvider } from './linting';
+import {
+  DATABRICKS_NOTEBOOK_HEADER,
+  LANGUAGE_TO_MAGIC,
+  MAGIC_TO_CELL_TYPE,
+  MAGIC_TO_LANGUAGE,
+  SORTED_MAGIC_COMMANDS,
+  SQL_KEYWORDS_REGEX,
+  contentStartsWithMagic,
+} from './constants';
+import {
+  ensureMagicCommand,
+  handleNewCell,
+  removeMagicCommand,
+  convertCellToLanguage,
+  convertToPythonCell,
+  clearDisableSqlAutoDetectFlag,
+} from './utils/cellOperations';
+import {
+  findTextEditorTab,
+  findNotebookTab,
+  isInDiffTab,
+  replaceTabWithView,
+} from './utils/tabManager';
+import { sessionState } from './utils/sessionState';
 
 // Global kernel manager instance
 let kernelManager: KernelManager | undefined;
@@ -23,45 +47,36 @@ let catalogService: CatalogService | undefined;
 // Global profile manager for Databricks authentication
 let profileManager: ProfileManager | undefined;
 
-// Track documents currently being processed to avoid race conditions
-const processingDocuments = new Set<string>();
-
-// Track URIs currently being viewed as raw text (session-based)
-// This prevents auto-open from re-opening them as notebooks during the same session
-const viewingAsRawText = new Set<string>();
-
-// Databricks notebook header constant
-const DATABRICKS_HEADER = '# Databricks notebook source';
+// ===== ACTIVATION HELPER FUNCTIONS =====
 
 /**
- * Extension activation
- * Called when VS Code activates the extension
+ * Initialize ProfileManager and KernelManager with concurrent loading.
+ * @param context - The extension context
+ * @returns Object containing profileManager and kernelManager
  */
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  console.log('Databricks Notebook Viewer is now active');
-
+async function initializeManagers(
+  context: vscode.ExtensionContext
+): Promise<{ profileManager: ProfileManager; kernelManager: KernelManager }> {
   // Register the notebook serializer
   context.subscriptions.push(
     vscode.workspace.registerNotebookSerializer(
       'databricks-notebook',
       new DatabricksNotebookSerializer(),
-      {
-        transientOutputs: true,
-      }
+      { transientOutputs: true }
     )
   );
 
-  // Initialize ProfileManager and KernelManager in parallel for faster startup
-  profileManager = new ProfileManager(context);
-  context.subscriptions.push(profileManager);
+  // Initialize ProfileManager and KernelManager
+  const pm = new ProfileManager(context);
+  context.subscriptions.push(pm);
 
-  kernelManager = new KernelManager(context.extensionPath, profileManager);
-  context.subscriptions.push(kernelManager);
+  const km = new KernelManager(context.extensionPath, pm);
+  context.subscriptions.push(km);
 
   // Run profile loading and kernel initialization concurrently
   const [profileLoadResult, kernelInitResult] = await Promise.allSettled([
-    profileManager.loadProfiles(),
-    kernelManager.initialize()
+    pm.loadProfiles(),
+    km.initialize()
   ]);
 
   // Handle profile loading result
@@ -71,53 +86,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Handle kernel initialization result
   if (kernelInitResult.status === 'fulfilled') {
-    console.log(`Kernel manager initialized with ${kernelManager?.getControllerCount()} controllers`);
+    console.log(`Kernel manager initialized with ${km.getControllerCount()} controllers`);
   } else {
     console.error('Failed to initialize kernel manager:', kernelInitResult.reason);
     // Non-fatal error - continue without kernel support
   }
 
-  // Initialize Status Bar (if enabled in settings)
+  return { profileManager: pm, kernelManager: km };
+}
+
+/**
+ * Initialize Status Bar (if enabled in settings).
+ * @param context - The extension context
+ * @param pm - The profile manager
+ */
+function initializeStatusBar(
+  context: vscode.ExtensionContext,
+  pm: ProfileManager
+): void {
   const config = vscode.workspace.getConfiguration('databricks-notebook');
   if (config.get<boolean>('showProfileInStatusBar', true)) {
-    const statusBar = new DatabricksStatusBar(profileManager);
+    const statusBar = new DatabricksStatusBar(pm);
     context.subscriptions.push(statusBar);
   }
+}
 
-  // Register profile selection commands
-  context.subscriptions.push(
-    vscode.commands.registerCommand('databricks-notebook.selectProfile', async () => {
-      if (profileManager) {
-        await showProfileQuickPick(profileManager);
-      }
-    }),
-    vscode.commands.registerCommand('databricks-notebook.refreshProfiles', async () => {
-      if (profileManager) {
-        await profileManager.loadProfiles();
-        vscode.window.showInformationMessage('Databricks profiles refreshed');
-      }
-    })
-  );
-
-  // Initialize cross-cell linting provider
-  try {
-    const lintingProvider = new NotebookDiagnosticProvider(context);
-    context.subscriptions.push(lintingProvider);
-    console.log('Cross-cell linting provider initialized');
-  } catch (error) {
-    console.error('Failed to initialize linting provider:', error);
-    // Non-fatal error - continue without linting
-  }
-
+/**
+ * Initialize SQL intellisense providers and catalog service.
+ * @param context - The extension context
+ * @param km - The kernel manager
+ * @returns The initialized catalog service
+ */
+function initializeIntellisenseProviders(
+  context: vscode.ExtensionContext,
+  km: KernelManager
+): CatalogService {
   // Initialize SQL intellisense for catalog/schema/table completion
-  catalogService = new CatalogService(() => kernelManager?.getActiveExecutor() ?? null);
+  const cs = new CatalogService(() => km.getActiveExecutor() ?? null);
 
   // Register kernel-related commands (with callback to clear catalog cache on restart)
-  kernelManager.registerCommands(context, () => {
-    catalogService?.clearCache();
+  km.registerCommands(context, () => {
+    cs.clearCache();
   });
+
   const sqlParser = new SqlContextParser();
-  const sqlCompletionProvider = new SqlCompletionProvider(catalogService, sqlParser);
+  const sqlCompletionProvider = new SqlCompletionProvider(cs, sqlParser);
 
   // Register completion provider for SQL in notebook cells
   context.subscriptions.push(
@@ -128,10 +141,57 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
+  return cs;
+}
+
+/**
+ * Initialize cross-cell linting provider.
+ * @param context - The extension context
+ */
+function initializeLintingProvider(context: vscode.ExtensionContext): void {
+  try {
+    const lintingProvider = new NotebookDiagnosticProvider(context);
+    context.subscriptions.push(lintingProvider);
+    console.log('Cross-cell linting provider initialized');
+  } catch (error) {
+    console.error('Failed to initialize linting provider:', error);
+    // Non-fatal error - continue without linting
+  }
+}
+
+/**
+ * Register profile selection commands.
+ * @param context - The extension context
+ * @param pm - The profile manager
+ */
+function registerProfileCommands(
+  context: vscode.ExtensionContext,
+  pm: ProfileManager
+): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('databricks-notebook.selectProfile', async () => {
+      await showProfileQuickPick(pm);
+    }),
+    vscode.commands.registerCommand('databricks-notebook.refreshProfiles', async () => {
+      await pm.loadProfiles();
+      vscode.window.showInformationMessage('Databricks profiles refreshed');
+    })
+  );
+}
+
+/**
+ * Register notebook-related commands (open as notebook, view source, refresh catalog).
+ * @param context - The extension context
+ * @param cs - The catalog service
+ */
+function registerNotebookCommands(
+  context: vscode.ExtensionContext,
+  cs: CatalogService
+): void {
   // Command to refresh catalog cache manually
   context.subscriptions.push(
     vscode.commands.registerCommand('databricks-notebook.refreshCatalogCache', () => {
-      catalogService?.clearCache();
+      cs.clearCache();
       vscode.window.showInformationMessage('Catalog cache cleared. Will refresh on next completion.');
     })
   );
@@ -155,14 +215,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     )
   );
+}
 
-  // Clear viewingAsRawText flag when text editor tab is closed
+/**
+ * Setup event listeners for document and notebook changes.
+ * @param context - The extension context
+ */
+function setupEventListeners(context: vscode.ExtensionContext): void {
+  // Clear viewing as raw text flag when text editor tab is closed
   // This allows the file to be auto-opened as notebook when reopened
   context.subscriptions.push(
     vscode.window.tabGroups.onDidChangeTabs((event) => {
       for (const closedTab of event.closed) {
         if (closedTab.input instanceof vscode.TabInputText) {
-          viewingAsRawText.delete(closedTab.input.uri.toString());
+          sessionState.clearRawTextView(closedTab.input.uri.toString());
         }
       }
     })
@@ -186,21 +252,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Clean up autoDetectedCells when notebook is closed to prevent memory leaks
+  // Clean up auto-detected cells when notebook is closed to prevent memory leaks
   context.subscriptions.push(
     vscode.workspace.onDidCloseNotebookDocument((notebook) => {
       if (notebook.notebookType !== 'databricks-notebook') {
         return;
       }
-      // Clean up entries for this notebook by matching the notebook path in cell URIs
-      const notebookPath = notebook.uri.fsPath;
-      for (const key of autoDetectedCells) {
-        if (key.includes(notebookPath)) {
-          autoDetectedCells.delete(key);
-        }
-      }
+      // Clean up entries for this notebook
+      sessionState.clearAutoDetectedForNotebook(notebook.uri.fsPath);
     })
   );
+}
+
+/**
+ * Extension activation
+ * Called when VS Code activates the extension
+ */
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  console.log('Databricks Notebook Studio is now active');
+
+  // Initialize core components
+  const managers = await initializeManagers(context);
+  profileManager = managers.profileManager;
+  kernelManager = managers.kernelManager;
+
+  // Setup UI components
+  initializeStatusBar(context, profileManager);
+
+  // Initialize linting provider
+  initializeLintingProvider(context);
+
+  // Initialize intellisense providers
+  catalogService = initializeIntellisenseProviders(context, kernelManager);
+
+  // Register commands
+  registerProfileCommands(context, profileManager);
+  registerNotebookCommands(context, catalogService);
+
+  // Setup event listeners
+  setupEventListeners(context);
 }
 
 /**
@@ -230,26 +320,10 @@ async function openAsNotebook(uri?: vscode.Uri): Promise<void> {
     }
   }
 
-  const uriString = fileUri.toString();
-
   // Open as notebook - close existing text editor first for unified tab experience
   try {
-    // Find the current text editor tab to get view column and close it
-    const tabInfo = findTextEditorTab(uriString);
-    const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
-    // Close the text editor tab first to avoid two tabs
-    if (tabInfo) {
-      await vscode.window.tabGroups.close(tabInfo.tab);
-    }
-
-    // Open notebook in the same view column
-    await vscode.commands.executeCommand(
-      'vscode.openWith',
-      fileUri,
-      'databricks-notebook',
-      viewColumn
-    );
+    const tabInfo = findTextEditorTab(fileUri.toString());
+    await replaceTabWithView(fileUri, tabInfo, 'databricks-notebook');
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to open notebook: ${error}`);
   }
@@ -272,29 +346,14 @@ async function openAsRawText(uri?: vscode.Uri): Promise<void> {
 
   // Mark this URI as being viewed as raw text (session-based)
   // This is cleared when the text editor tab is closed
-  viewingAsRawText.add(uriString);
-
-  // Find the current notebook tab to get view column
-  const tabInfo = findNotebookTab(uriString);
-  const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
+  sessionState.markAsRawText(uriString);
 
   try {
-    // Close the notebook tab first (same pattern as openAsNotebook)
-    if (tabInfo) {
-      await vscode.window.tabGroups.close(tabInfo.tab);
-    }
-
-    // Open as default text editor
-    // Using 'default' as the editor ID opens with the standard text editor
-    await vscode.commands.executeCommand(
-      'vscode.openWith',
-      fileUri,
-      'default',
-      viewColumn
-    );
+    const tabInfo = findNotebookTab(uriString);
+    await replaceTabWithView(fileUri, tabInfo, 'default');
   } catch (error) {
     // Clean up on error
-    viewingAsRawText.delete(uriString);
+    sessionState.clearRawTextView(uriString);
     vscode.window.showErrorMessage(`Failed to open as text: ${error}`);
   }
 }
@@ -310,45 +369,7 @@ function isDatabricksNotebookSync(document: vscode.TextDocument): boolean {
     return false;
   }
   const firstLine = document.lineAt(0).text.trim();
-  return firstLine === DATABRICKS_HEADER;
-}
-
-/**
- * Find the tab and view column for a text document
- * @param uriString - The URI string of the document
- * @returns Object with tab and viewColumn, or null if not found
- */
-function findTextEditorTab(uriString: string): { tab: vscode.Tab; viewColumn: vscode.ViewColumn } | null {
-  for (const tabGroup of vscode.window.tabGroups.all) {
-    for (const tab of tabGroup.tabs) {
-      if (
-        tab.input instanceof vscode.TabInputText &&
-        tab.input.uri.toString() === uriString
-      ) {
-        return { tab, viewColumn: tabGroup.viewColumn };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Find the tab and view column for a notebook document
- * @param uriString - The URI string of the document
- * @returns Object with tab and viewColumn, or null if not found
- */
-function findNotebookTab(uriString: string): { tab: vscode.Tab; viewColumn: vscode.ViewColumn } | null {
-  for (const tabGroup of vscode.window.tabGroups.all) {
-    for (const tab of tabGroup.tabs) {
-      if (
-        tab.input instanceof vscode.TabInputNotebook &&
-        tab.input.uri.toString() === uriString
-      ) {
-        return { tab, viewColumn: tabGroup.viewColumn };
-      }
-    }
-  }
-  return null;
+  return firstLine === DATABRICKS_NOTEBOOK_HEADER;
 }
 
 /**
@@ -368,26 +389,19 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   }
 
   // Skip if opened in a diff editor tab
-  const isDiffTab = vscode.window.tabGroups.all.some(group =>
-    group.tabs.some(tab =>
-      (tab.input instanceof vscode.TabInputTextDiff || tab.input instanceof vscode.TabInputNotebookDiff) &&
-      (tab.input.original.toString() === document.uri.toString() ||
-       tab.input.modified.toString() === document.uri.toString())
-    )
-  );
-  if (isDiffTab) {
+  if (isInDiffTab(document.uri.toString())) {
     return;
   }
 
   const uriString = document.uri.toString();
 
   // Skip if already processing this document (avoid race conditions)
-  if (processingDocuments.has(uriString)) {
+  if (sessionState.isProcessing(uriString)) {
     return;
   }
 
   // Skip if user explicitly chose to view as raw text
-  if (viewingAsRawText.has(uriString)) {
+  if (sessionState.isViewingAsRawText(uriString)) {
     return;
   }
 
@@ -402,35 +416,20 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   const showNotification = config.get<boolean>('showNotification', true);
 
   if (autoOpen) {
-    // Mark as processing to prevent duplicate handling
-    processingDocuments.add(uriString);
+    // Mark as processing to prevent duplicate handling (auto-clears after timeout)
+    sessionState.startProcessing(uriString);
 
     try {
-      // Find the current tab info before closing
+      // Use replaceTabWithView for unified close-then-open pattern
       const tabInfo = findTextEditorTab(uriString);
-      const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
-      // IMPORTANT: Close text editor FIRST to avoid two tabs being visible
-      if (tabInfo) {
-        await vscode.window.tabGroups.close(tabInfo.tab);
-      }
-
-      // Open notebook in the same view column
-      await vscode.commands.executeCommand(
-        'vscode.openWith',
-        document.uri,
-        'databricks-notebook',
-        viewColumn
-      );
-    } finally {
-      // Clear processing flag after a delay to handle any remaining events
-      setTimeout(() => {
-        processingDocuments.delete(uriString);
-      }, 500);
+      await replaceTabWithView(document.uri, tabInfo, 'databricks-notebook');
+    } catch (error) {
+      // Log error but let processing flag auto-clear via timeout
+      console.error('[Extension] Failed to auto-open notebook:', error);
     }
   } else if (showNotification) {
-    // Mark as processing
-    processingDocuments.add(uriString);
+    // Mark as processing (auto-clears after timeout)
+    sessionState.startProcessing(uriString);
 
     try {
       // Show notification
@@ -442,391 +441,161 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
       );
 
       if (action === 'Open as Notebook') {
-        // Find the current tab info
+        // Use replaceTabWithView for unified close-then-open pattern
         const tabInfo = findTextEditorTab(uriString);
-        const viewColumn = tabInfo?.viewColumn || vscode.ViewColumn.Active;
-
-        // Close text editor first
-        if (tabInfo) {
-          await vscode.window.tabGroups.close(tabInfo.tab);
-        }
-
-        // Open notebook
-        await vscode.commands.executeCommand(
-          'vscode.openWith',
-          document.uri,
-          'databricks-notebook',
-          viewColumn
-        );
+        await replaceTabWithView(document.uri, tabInfo, 'databricks-notebook');
       } else if (action === "Don't ask again") {
         await config.update('showNotification', false, vscode.ConfigurationTarget.Global);
       }
-    } finally {
-      // Clear processing flag after a delay
-      setTimeout(() => {
-        processingDocuments.delete(uriString);
-      }, 500);
+    } catch (error) {
+      // Log error but let processing flag auto-clear via timeout
+      console.error('[Extension] Failed during notification flow:', error);
     }
   }
 }
 
-// SQL keywords that trigger auto-detection
-const SQL_KEYWORDS_REGEX = /^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|MERGE|TRUNCATE|EXPLAIN|DESCRIBE|SHOW|USE)\b/i;
+// ===== CELL CONTENT CHANGE HANDLERS =====
 
-// Track cells that have been auto-detected to avoid repeated changes
-// Uses cell document URI which is stable across index changes
-const autoDetectedCells = new Set<string>();
-
-// Map language IDs to their required magic commands
-const LANGUAGE_TO_MAGIC: Record<string, string> = {
-  'sql': '%sql',
-  'scala': '%scala',
-  'r': '%r',
-  'shellscript': '%sh',
-};
-
-// Sorted magic commands by length (longest first) to prevent %r matching %run
-const SORTED_MAGIC_COMMANDS = Object.values(LANGUAGE_TO_MAGIC).sort(
-  (a, b) => b.length - a.length
-);
+// Get the auto-detected cells Set from sessionState for use with cellOperations utilities
+const autoDetectedCells = sessionState.getAutoDetectedCells();
 
 /**
- * Check if content starts with a specific magic command
- * Ensures exact match (followed by whitespace, newline, or end of string)
- * to prevent %r matching %run
- */
-function contentStartsWithMagic(content: string, magic: string): boolean {
-  if (!content.startsWith(magic)) {
-    return false;
-  }
-  // Check that the magic command is complete (not a prefix of another command)
-  const afterMagic = content.substring(magic.length);
-  return afterMagic.length === 0 || /^[\s\n]/.test(afterMagic);
-}
-
-// Map magic commands to Databricks cell types
-const MAGIC_TO_TYPE: Record<string, string> = {
-  '%sql': 'sql',
-  '%scala': 'scala',
-  '%r': 'r',
-  '%sh': 'shell',
-};
-
-/**
- * Ensure a cell has the required magic command in its content
+ * Handle magic-command language cells (SQL, Scala, R, Shell) without magic command.
+ * This happens when: 1) user changes language via picker, 2) user manually removes magic
  * @param notebook - The notebook document
- * @param cell - The cell to update
- * @param magicCommand - The magic command to ensure (e.g., '%sql')
- * @param languageId - The target language ID
+ * @param cell - The cell to handle
+ * @param cellKey - The cell's unique key (URI string)
+ * @param content - The trimmed cell content
+ * @param requiredMagic - The required magic command for this language
+ * @param languageId - The cell's language ID
  */
-async function ensureMagicCommand(
+async function handleMagicLanguageCell(
   notebook: vscode.NotebookDocument,
   cell: vscode.NotebookCell,
-  magicCommand: string,
+  cellKey: string,
+  content: string,
+  requiredMagic: string,
   languageId: string
 ): Promise<void> {
-  const content = cell.document.getText();
-  const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
-
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
-
-  // Build new content with magic command
-  // Always add a newline after the magic command so cursor is on a new line
-  const newContent = content.trim()
-    ? `${magicCommand}\n${content}`
-    : `${magicCommand}\n`;
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    newContent,
-    languageId
-  );
-
-  // Clear disableSqlAutoDetect flag if present (user is manually converting back)
-  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
-  delete metadata.disableSqlAutoDetect;
-
-  cellData.metadata = {
-    ...metadata,
-    databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-      // Move cursor to the end of the cell (after the magic command on a new line)
-      await vscode.commands.executeCommand('cursorBottom');
-    }
-  }
-}
-
-/**
- * Handle newly added cells to ensure magic commands are present
- * @param notebook - The notebook document
- * @param cell - The newly added cell
- */
-async function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.NotebookCell): Promise<void> {
-  // Only process code cells
-  if (cell.kind !== vscode.NotebookCellKind.Code) {
+  // Skip if we just processed this cell to avoid infinite loops
+  if (autoDetectedCells.has(cellKey)) {
     return;
   }
 
-  const languageId = cell.document.languageId;
-  const content = cell.document.getText().trim();
-  const cellKey = cell.document.uri.toString();
+  // Use databricksType metadata to distinguish between:
+  // 1. User changed language from Python to this language (databricksType is 'code' or undefined)
+  // 2. User manually deleted the magic command (databricksType matches the current language)
+  const databricksType = cell.metadata?.databricksType as string | undefined;
+  const expectedType = MAGIC_TO_CELL_TYPE[requiredMagic];
+  const wasMagicLanguageCell = databricksType === expectedType;
 
+  if (wasMagicLanguageCell && content.length > 0) {
+    // Cell was already a magic-language cell (e.g., SQL) but magic was removed.
+    // User intentionally deleted the magic command → convert to Python.
+    await convertToPythonCell(notebook, cell, content, autoDetectedCells);
+    return;
+  }
+
+  // Cell is being converted to a magic language (e.g., Python → SQL),
+  // or it's a fresh/empty cell that needs magic command.
+  // ensureMagicCommand also clears the disableSqlAutoDetect flag if present.
+  await ensureMagicCommand(notebook, cell, requiredMagic, languageId, autoDetectedCells);
+}
+
+/**
+ * Handle magic command found in Python cell content.
+ * Either converts to target language or removes magic based on context.
+ * @param notebook - The notebook document
+ * @param cell - The cell to handle
+ * @param magic - The magic command found
+ * @param languageId - The cell's current language ID
+ */
+async function handleMagicInPythonCell(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  magic: string,
+  languageId: string
+): Promise<void> {
+  // If user manually added magic command (disableSqlAutoDetect flag is set),
+  // convert to the appropriate language immediately
+  if (cell.metadata?.disableSqlAutoDetect === true) {
+    const targetLanguage = MAGIC_TO_LANGUAGE[magic] ?? 'shellscript';
+    await convertCellToLanguage(notebook, cell, targetLanguage, magic, autoDetectedCells);
+    return;
+  }
+  // Otherwise, remove the magic command (language was changed to Python)
+  await removeMagicCommand(notebook, cell, magic, languageId, autoDetectedCells);
+}
+
+/**
+ * Handle SQL auto-detection in Python cells.
+ * Converts Python cells starting with SQL keywords to SQL cells.
+ * @param notebook - The notebook document
+ * @param cell - The cell to handle
+ * @param content - The trimmed cell content
+ */
+async function handleSqlAutoDetection(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  content: string
+): Promise<void> {
+  // Check if SQL auto-detect is disabled for this cell (user explicitly removed %sql)
+  const disableSqlAutoDetect = cell.metadata?.disableSqlAutoDetect === true;
+  const hasSqlKeywords = SQL_KEYWORDS_REGEX.test(content);
+
+  if (disableSqlAutoDetect) {
+    // Skip auto-detect while flag is set (user is editing the converted cell).
+    // Don't clear the flag during typing to avoid disruptive cell replacements.
+    // The flag will be cleared when cell is empty or notebook is reloaded.
+    if (content.length === 0) {
+      await clearDisableSqlAutoDetectFlag(notebook, cell);
+    }
+    return;
+  }
+
+  // Auto-detect SQL in Python cells (existing functionality)
+  if (hasSqlKeywords) {
+    await ensureMagicCommand(notebook, cell, '%sql', 'sql', autoDetectedCells);
+  }
+}
+
+/**
+ * Handle Python cell content changes.
+ * Checks for magic commands and SQL auto-detection.
+ * @param notebook - The notebook document
+ * @param cell - The cell to handle
+ * @param cellKey - The cell's unique key (URI string)
+ * @param content - The trimmed cell content
+ * @param languageId - The cell's language ID
+ */
+async function handlePythonCell(
+  notebook: vscode.NotebookDocument,
+  cell: vscode.NotebookCell,
+  cellKey: string,
+  content: string,
+  languageId: string
+): Promise<void> {
   // Skip if already processed
   if (autoDetectedCells.has(cellKey)) {
     return;
   }
 
-  const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
-
-  // If language requires magic command and content doesn't have it
-  if (requiredMagic && !contentStartsWithMagic(content, requiredMagic)) {
-    await ensureMagicCommand(notebook, cell, requiredMagic, languageId);
-  }
-}
-
-/**
- * Remove magic command from cell content when language is changed away from magic-command language
- * @param notebook - The notebook document
- * @param cell - The cell to update
- * @param magicCommand - The magic command to remove (e.g., '%sql')
- * @param languageId - The target language ID
- */
-async function removeMagicCommand(
-  notebook: vscode.NotebookDocument,
-  cell: vscode.NotebookCell,
-  magicCommand: string,
-  languageId: string
-): Promise<void> {
-  const content = cell.document.getText();
-  const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
-
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
-
-  // Remove the magic command from content
-  // Handle both "%sql\n..." and "%sql" (just the command)
-  let newContent = content;
-  if (content.trim() === magicCommand) {
-    newContent = '';
-  } else if (content.startsWith(magicCommand + '\n')) {
-    newContent = content.substring(magicCommand.length + 1);
-  } else if (content.startsWith(magicCommand)) {
-    // Handle case where there's content directly after magic (e.g., "%sqlSELECT")
-    newContent = content.substring(magicCommand.length).trimStart();
-  }
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    newContent,
-    languageId
-  );
-
-  cellData.metadata = {
-    ...cell.metadata,
-    databricksType: 'code', // Reset to Python/code type
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
+  // Check if content starts with any magic command
+  // Use sorted list (longest first) to prevent %r matching %run
+  for (const magic of SORTED_MAGIC_COMMANDS) {
+    if (contentStartsWithMagic(content, magic)) {
+      await handleMagicInPythonCell(notebook, cell, magic, languageId);
+      return;
     }
   }
+
+  // Handle SQL auto-detection
+  await handleSqlAutoDetection(notebook, cell, content);
 }
 
 /**
- * Convert a Python cell to a magic-command language (SQL, Scala, R, Shell)
- * Called when user manually types magic command or changes language via UI
- * @param notebook - The notebook document
- * @param cell - The cell to convert
- * @param languageId - The target language ID
- * @param magicCommand - The magic command (e.g., '%sql')
- */
-async function convertCellToLanguage(
-  notebook: vscode.NotebookDocument,
-  cell: vscode.NotebookCell,
-  languageId: string,
-  magicCommand: string
-): Promise<void> {
-  const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
-  const content = cell.document.getText();
-
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    content,
-    languageId
-  );
-
-  // Clear disableSqlAutoDetect flag and set appropriate databricksType
-  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
-  delete metadata.disableSqlAutoDetect;
-  cellData.metadata = {
-    ...metadata,
-    databricksType: MAGIC_TO_TYPE[magicCommand] || 'code',
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
-}
-
-/**
- * Convert a magic-command language cell back to Python
- * Called when user removes the magic command from a cell (e.g., deletes %sql from SQL cell)
- * @param notebook - The notebook document
- * @param cell - The cell to convert
- * @param content - The current cell content (without magic command)
- */
-async function convertToPythonCell(
-  notebook: vscode.NotebookDocument,
-  cell: vscode.NotebookCell,
-  content: string
-): Promise<void> {
-  const cellKey = cell.document.uri.toString();
-  const cellIndex = cell.index;
-
-  // Mark as processed to prevent infinite loops
-  autoDetectedCells.add(cellKey);
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    content,
-    'python'
-  );
-
-  // Set disableSqlAutoDetect flag to prevent SQL auto-detection from re-adding %sql
-  // when user types. This flag persists across cell replacements (unlike autoDetectedCells
-  // Set which tracks by URI that changes on replacement). The flag is cleared when content
-  // no longer contains SQL keywords, allowing auto-detect to work again for fresh SQL.
-  cellData.metadata = {
-    ...cell.metadata,
-    databricksType: 'code',
-    disableSqlAutoDetect: true,
-  };
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
-}
-
-/**
- * Clear the disableSqlAutoDetect flag from cell metadata
- * Called when content no longer starts with SQL keywords, allowing future auto-detect
- * @param notebook - The notebook document
- * @param cell - The cell to update
- */
-async function clearDisableSqlAutoDetectFlag(
-  notebook: vscode.NotebookDocument,
-  cell: vscode.NotebookCell
-): Promise<void> {
-  const cellIndex = cell.index;
-  const content = cell.document.getText();
-  const languageId = cell.document.languageId;
-
-  const edit = new vscode.WorkspaceEdit();
-
-  const cellData = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Code,
-    content,
-    languageId
-  );
-
-  // Copy metadata but remove the disableSqlAutoDetect flag
-  const metadata = { ...(cell.metadata || {}) } as Record<string, unknown>;
-  delete metadata.disableSqlAutoDetect;
-  cellData.metadata = metadata;
-
-  edit.set(notebook.uri, [
-    vscode.NotebookEdit.replaceCells(
-      new vscode.NotebookRange(cellIndex, cellIndex + 1),
-      [cellData]
-    )
-  ]);
-
-  const success = await vscode.workspace.applyEdit(edit);
-
-  if (success) {
-    // Restore cursor to the cell and enter edit mode
-    const notebookEditor = vscode.window.activeNotebookEditor;
-    if (notebookEditor && notebookEditor.notebook.uri.toString() === notebook.uri.toString()) {
-      notebookEditor.selections = [new vscode.NotebookRange(cellIndex, cellIndex + 1)];
-      await vscode.commands.executeCommand('notebook.cell.edit');
-    }
-  }
-}
-
-/**
- * Handle cell content or language changes
+ * Handle cell content or language changes.
+ * Delegates to focused handlers based on cell language.
  * @param notebook - The notebook document
  * @param change - The cell change event
  */
@@ -844,75 +613,17 @@ async function handleCellContentChange(
   const cellKey = cell.document.uri.toString();
   const languageId = cell.document.languageId;
   const content = cell.document.getText().trim();
-
   const requiredMagic = LANGUAGE_TO_MAGIC[languageId];
 
   // Handle magic-command language cells (SQL, Scala, R, Shell) without magic command
-  // This happens when: 1) user changes language via picker, 2) user manually removes magic
   if (requiredMagic && !contentStartsWithMagic(content, requiredMagic)) {
-    // Skip if we just processed this cell to avoid infinite loops
-    if (autoDetectedCells.has(cellKey)) {
-      return;
-    }
-
-    // If disableSqlAutoDetect flag is set, user is converting back to SQL via language picker
-    // Add the magic command and clear the flag
-    if (cell.metadata?.disableSqlAutoDetect === true) {
-      await ensureMagicCommand(notebook, cell, requiredMagic, languageId);
-      return;
-    }
-
-    // If cell has content but no magic command, user manually deleted it
-    // Convert back to Python
-    if (content.length > 0) {
-      await convertToPythonCell(notebook, cell, content);
-      return;
-    }
-
-    // Otherwise, it's a fresh/empty cell via language picker
-    // Add the magic command
-    await ensureMagicCommand(notebook, cell, requiredMagic, languageId);
+    await handleMagicLanguageCell(notebook, cell, cellKey, content, requiredMagic, languageId);
     return;
   }
 
-  // Handle language change FROM magic-command language to Python
-  // If language is now Python but content still has a magic command, handle it
-  if (languageId === 'python' && !autoDetectedCells.has(cellKey)) {
-    // Check if content starts with any magic command
-    // Use sorted list (longest first) to prevent %r matching %run
-    for (const magic of SORTED_MAGIC_COMMANDS) {
-      if (contentStartsWithMagic(content, magic)) {
-        // If user manually added magic command (disableSqlAutoDetect flag is set),
-        // convert to the appropriate language immediately
-        if (cell.metadata?.disableSqlAutoDetect === true) {
-          const targetLanguage = magic === '%sql' ? 'sql' : magic === '%scala' ? 'scala' : magic === '%r' ? 'r' : 'shellscript';
-          await convertCellToLanguage(notebook, cell, targetLanguage, magic);
-          return;
-        }
-        // Otherwise, remove the magic command (language was changed to Python)
-        await removeMagicCommand(notebook, cell, magic, languageId);
-        return;
-      }
-    }
-
-    // Check if SQL auto-detect is disabled for this cell (user explicitly removed %sql)
-    const disableSqlAutoDetect = cell.metadata?.disableSqlAutoDetect === true;
-    const hasSqlKeywords = SQL_KEYWORDS_REGEX.test(content);
-
-    if (disableSqlAutoDetect) {
-      // Skip auto-detect while flag is set (user is editing the converted cell).
-      // Don't clear the flag during typing to avoid disruptive cell replacements.
-      // The flag will be cleared when cell is empty or notebook is reloaded.
-      if (content.length === 0) {
-        await clearDisableSqlAutoDetectFlag(notebook, cell);
-      }
-      return;
-    }
-
-    // Auto-detect SQL in Python cells (existing functionality)
-    if (hasSqlKeywords) {
-      await ensureMagicCommand(notebook, cell, '%sql', 'sql');
-    }
+  // Handle Python cells
+  if (languageId === 'python') {
+    await handlePythonCell(notebook, cell, cellKey, content, languageId);
   }
 }
 
@@ -937,7 +648,7 @@ async function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEve
   const addedCellPromises: Promise<void>[] = [];
   for (const contentChange of event.contentChanges) {
     for (const addedCell of contentChange.addedCells) {
-      addedCellPromises.push(handleNewCell(event.notebook, addedCell));
+      addedCellPromises.push(handleNewCell(event.notebook, addedCell, autoDetectedCells));
     }
   }
   await Promise.all(addedCellPromises);
@@ -997,10 +708,10 @@ async function showProfileQuickPick(manager: ProfileManager): Promise<void> {
  * Called when VS Code deactivates the extension
  */
 export function deactivate(): void {
-  console.log('Databricks Notebook Viewer is now deactivated');
-  processingDocuments.clear();
-  viewingAsRawText.clear();
-  autoDetectedCells.clear();
+  console.log('Databricks Notebook Studio is now deactivated');
+
+  // Clear all session state (processing, raw text, auto-detected cells)
+  sessionState.clear();
 
   // Clear catalog cache
   catalogService?.clearCache();

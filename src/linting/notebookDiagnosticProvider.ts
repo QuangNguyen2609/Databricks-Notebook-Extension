@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { VirtualDocumentGenerator, VirtualDocument } from './virtualDocumentGenerator';
 import { DiagnosticMapper } from './diagnosticMapper';
+import { extractErrorMessage } from '../utils/errorHandler';
 
 /**
  * Provides cross-cell linting for Databricks notebooks
@@ -138,7 +139,7 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
     } catch (error) {
       console.error('[NotebookDiagnosticProvider] Failed to analyze notebook:', error);
       vscode.window.showErrorMessage(
-        `Failed to analyze notebook for linting: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to analyze notebook for linting: ${extractErrorMessage(error)}`
       );
     }
   }
@@ -321,26 +322,27 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
 
   /**
    * Dispose of resources
+   *
+   * Uses synchronous cleanup to avoid race conditions during disposal.
+   * Pending updates will complete but their results won't update diagnostics
+   * since the diagnostic collection is cleared synchronously.
    */
   dispose(): void {
-    // Clear all debounce timers
+    // Clear all debounce timers synchronously
     for (const timeout of this.updateDebounce.values()) {
       clearTimeout(timeout);
     }
     this.updateDebounce.clear();
 
-    // Wait for pending updates to complete (with timeout)
-    Promise.race([
-      Promise.all(this.pendingUpdates),
-      new Promise(resolve => setTimeout(resolve, 1000))  // 1s timeout
-    ]).finally(() => {
-      // Clear diagnostics
-      this.diagnosticCollection.clear();
+    // Clear diagnostics synchronously
+    this.diagnosticCollection.clear();
 
-      // Dispose of event listeners
-      this.disposables.forEach((d) => d.dispose());
+    // Dispose of event listeners synchronously
+    this.disposables.forEach((d) => d.dispose());
 
-      console.log('[NotebookDiagnosticProvider] Disposed');
-    });
+    // Note: pendingUpdates will complete but won't update diagnostics
+    // since the diagnostic collection is already cleared
+
+    console.log('[NotebookDiagnosticProvider] Disposed');
   }
 }

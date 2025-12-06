@@ -1,20 +1,37 @@
-# Databricks Notebook Viewer
+# Databricks Notebook Studio
 
-A VS Code extension that renders Databricks `.py` notebook files as proper notebooks with visual cell separation, rendered Markdown, and syntax-highlighted code cells.
+<p align="center">
+  <img src="assets/databricks-logo-icon.png" alt="Databricks Logo" width="128" height="128">
+</p>
+
+A VS Code extension that transforms Databricks `.py` files into interactive notebooks with SQL execution, rich DataFrame display, and multi-profile authentication.
 
 ## Features
 
-- **Visual Cell Separation**: Clearly separated cells with proper boundaries
-- **Rendered Markdown**: Markdown cells are rendered with full formatting support
-- **Syntax Highlighting**: Support for Python, SQL and shell code cells
-- **Magic Command Interpretation**: Automatic detection of `%md`, `%sql`, `%python`, `%pip` commands
-- **Cell Titles**: Support for `DBTITLE` metadata
-- **Round-trip Editing**: Edit and save notebooks while preserving Databricks format
-- **Multi-Profile Authentication**: Manage and switch between multiple Databricks profiles
-  - Status bar indicator showing current profile
-  - Quick Pick selector for easy profile switching
-  - Automatic kernel restart on profile change
-  - Workspace-level profile persistence
+### 🚀 Execute Code with Databricks Connect
+- **Run Python & SQL cells** directly against your Databricks cluster
+- **Serverless compute support** - no cluster management needed
+- **Persistent kernel state** - variables persist across cell executions like Jupyter
+
+### 📊 Rich DataFrame Display
+- **Interactive tables** for Spark DataFrame results
+- **Column sorting and resizing** for easy data exploration
+- **Scrollable output** for large query results
+- **Formatted display** - automatic `spark.sql()` wrapping for SQL cells
+
+### 🔐 Multi-Profile Authentication
+- **Switch between Databricks profiles** with a single click
+- **Status bar indicator** showing current active profile
+- **Automatic kernel restart** on profile change
+- **Workspace-level persistence** - remembers your selection per project
+
+### 📝 Full Notebook Experience
+- **Visual cell separation** with proper boundaries
+- **Rendered Markdown** with full formatting support
+- **Syntax highlighting** for Python, SQL, Scala, R, and Shell
+- **Magic command support** - `%md`, `%sql`, `%python`, `%pip`, `%sh`, `%run`
+- **Cell titles** via `DBTITLE` metadata
+- **Round-trip editing** - preserves Databricks format on save
 
 ## Supported Cell Types
 
@@ -63,7 +80,7 @@ pip install "databricks-connect<=17.2"
 
 ### From Marketplace (Coming Soon)
 
-Search for "Databricks Notebook Viewer" in the VS Code Extensions Marketplace.
+Search for "Databricks Notebook Studio" in the VS Code Extensions Marketplace.
 
 ## Usage
 
@@ -107,7 +124,7 @@ The Databricks extension automatically:
 - Generates and refreshes OAuth tokens in `~/.databricks/token-cache.json`
 - Enables seamless auto-sync between local files and Databricks workspace
 
-This integration allows the Databricks Notebook Viewer to automatically authenticate with your configured profiles without manual token management.
+This integration allows the Databricks Notebook Studio to automatically authenticate with your configured profiles without manual token management.
 
 **Alternative: Databricks CLI**
 
@@ -207,7 +224,7 @@ print("Python cell")
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd databricks-notebook-viewer
+cd databricks-notebook-studio
 
 # Install dependencies
 npm install

@@ -1,23 +1,34 @@
 # Changelog
 
-All notable changes to the Databricks Notebook Viewer extension will be documented in this file.
+All notable changes to the Databricks Notebook Studio extension will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2025-12-05
+
+### Refactor
+- **Centralized Constants**: Consolidated magic
+commands, delimiters, and timing constants into
+`src/constants/index.ts`
+- **Extracted Utilities**: New reusable modules for
+  tab management (`tabManager.ts`), cell editing
+(`cellEditor.ts`, `cellOperations.ts`), and request
+  caching (`requestCache.ts`)
+- **Standardized Naming**: Consistent `_` prefix
+for private fields, `is` prefix for boolean getters
+- **Enhanced Test Suite**: Added unit tests for
+kernelManager, persistentExecutor,
+pythonKernelController, serializer, and constants
+
+
 ## [0.3.5] - 2025-12-05
 
 ### Fixed
-- **Async/Await Optimizations**: Eliminated UI-blocking operations and improved reliability
-  - ProfileManager: Replaced sync file reads with async operations (no more freezing on profile load)
-  - PythonExtensionApi: Replaced 20-50+ sync filesystem checks with async parallel checks (faster Python environment discovery, especially on Windows)
-  - PersistentExecutor: Fixed interval cleanup race condition (prevents memory leak)
-  - KernelManager: Added error handling for failed kernel restarts (user now sees warnings instead of silent failures)
-  - NotebookDiagnosticProvider: Fixed disposal race condition (prevents resource access after cleanup)
+- **Async/Await Optimizations**: Eliminated UI-blocking operations as well as API/IO function calls and improved reliability
 - **SQL Auto-Detect Loop**: Fixed annoying issue where deleting `%sql` from a cell would cause it to immediately reappear when typing any character
 - **Concurrent API/Function Calls**: Parallelized sequential operations for better performance with notebook operations
 - **JSON serialization for display()**: Apply safe serialization with fallback for robust rendering and doesn't fail the process if one value is corrupted
-
 
 ## [0.3.4] - 2025-12-04
 

@@ -8,4 +8,11 @@
 export { CatalogService } from './catalogService';
 export { SqlCompletionProvider } from './sqlCompletionProvider';
 export { SqlContextParser } from './sqlParser';
-export * from './types';
+export type {
+  CatalogInfo,
+  SchemaInfo,
+  TableInfo,
+  ColumnInfo,
+  SqlContext,
+  SqlContextType,
+} from './types';

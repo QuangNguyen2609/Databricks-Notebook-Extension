@@ -45,3 +45,7 @@ databricks.yml
 
 # Virtual documents for cross-cell linting
 .databricks-cache/
+
+# claude
+.claude/
+thoughts/

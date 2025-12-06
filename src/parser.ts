@@ -14,37 +14,19 @@ import {
   CellType,
   MagicCommandConfig,
 } from './types';
+import {
+  DATABRICKS_NOTEBOOK_HEADER,
+  CELL_DELIMITER,
+  MAGIC_PREFIX,
+  MAGIC_PREFIX_BARE,
+  TITLE_PREFIX,
+  MAGIC_COMMANDS,
+  SORTED_MAGIC_COMMANDS,
+  getMagicCommandForType as _getMagicCommandForType,
+} from './constants';
 
-// Constants for parsing
-const NOTEBOOK_HEADER = '# Databricks notebook source';
-const CELL_DELIMITER = '# COMMAND ----------';
-const MAGIC_PREFIX = '# MAGIC ';
-const MAGIC_PREFIX_BARE = '# MAGIC'; // For lines with no content after MAGIC
-const TITLE_PREFIX = '# DBTITLE ';
-
-/**
- * Mapping of magic commands to their cell types and languages
- * Note: Order matters for matching - longer commands should be checked first
- */
-const MAGIC_COMMANDS: Record<string, MagicCommandConfig> = {
-  '%md-sandbox': { type: 'markdown', language: 'markdown' },
-  '%md': { type: 'markdown', language: 'markdown' },
-  '%sql': { type: 'sql', language: 'sql' },
-  '%scala': { type: 'scala', language: 'scala' },
-  '%python': { type: 'code', language: 'python' },
-  '%sh': { type: 'shell', language: 'shellscript' },
-  '%fs': { type: 'fs', language: 'shellscript' },
-  '%run': { type: 'run', language: 'python' },
-  '%pip': { type: 'pip', language: 'shellscript' },
-  '%r': { type: 'r', language: 'r' },
-};
-
-/**
- * Sorted list of magic commands (longest first) for proper matching
- */
-const SORTED_MAGIC_COMMANDS = Object.keys(MAGIC_COMMANDS).sort(
-  (a, b) => b.length - a.length
-);
+// Alias for internal use (the function is re-exported at bottom of file)
+const getMagicCommandForType = _getMagicCommandForType;
 
 /**
  * Check if the content is a Databricks notebook
@@ -56,7 +38,7 @@ export function isDatabricksNotebook(content: string): boolean {
     return false;
   }
   const firstLine = content.split('\n')[0]?.trim();
-  return firstLine === NOTEBOOK_HEADER;
+  return firstLine === DATABRICKS_NOTEBOOK_HEADER;
 }
 
 /**
@@ -269,7 +251,7 @@ function parseMagicCell(
  * @returns The serialized notebook content
  */
 export function serializeNotebook(cells: DatabricksCell[]): string {
-  const lines: string[] = [NOTEBOOK_HEADER];
+  const lines: string[] = [DATABRICKS_NOTEBOOK_HEADER];
 
   cells.forEach((cell) => {
     // If cell has originalLines (content unchanged), use them directly
@@ -334,33 +316,8 @@ export function serializeNotebook(cells: DatabricksCell[]): string {
   return lines.join('\n');
 }
 
-/**
- * Get the appropriate magic command for a cell type
- * @param type - The cell type
- * @param originalCommand - The original magic command (if known)
- * @returns The magic command string
- */
-export function getMagicCommandForType(type: CellType, originalCommand?: string): string {
-  // If we have the original command, use it
-  if (originalCommand) {
-    return originalCommand;
-  }
-
-  // Map cell types to magic commands
-  const typeToCommand: Record<CellType, string> = {
-    code: '%python',
-    markdown: '%md',
-    sql: '%sql',
-    scala: '%scala',
-    r: '%r',
-    shell: '%sh',
-    fs: '%fs',
-    run: '%run',
-    pip: '%pip',
-  };
-
-  return typeToCommand[type] || '%python';
-}
+// Re-export getMagicCommandForType from constants for backwards compatibility
+export { getMagicCommandForType } from './constants';
 
 /**
  * Count the number of cells in a notebook
