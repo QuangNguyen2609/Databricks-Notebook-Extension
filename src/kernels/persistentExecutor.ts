@@ -90,20 +90,20 @@ let lastDbConnectVersion: string | undefined;
  * Manages a persistent Python process for code execution
  */
 export class PersistentExecutor implements vscode.Disposable {
-  private process: cp.ChildProcess | null = null;
-  private pythonPath: string;
-  private kernelScriptPath: string;
-  private workingDirectory: string;
-  private profileName: string | undefined;
-  private isReady = false;
-  private debugMode = false;
-  private pendingRequests = new Map<string, {
+  private _process: cp.ChildProcess | null = null;
+  private _pythonPath: string;
+  private _kernelScriptPath: string;
+  private _workingDirectory: string;
+  private _profileName: string | undefined;
+  private _isReady = false;
+  private _debugMode = false;
+  private _pendingRequests = new Map<string, {
     resolve: (result: KernelResponse) => void;
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
   }>();
-  private requestCounter = 0;
-  private readlineInterface: readline.Interface | null = null;
+  private _requestCounter = 0;
+  private _readlineInterface: readline.Interface | null = null;
 
   /** Event emitter for process lifecycle events */
   private _onDidChangeState = new vscode.EventEmitter<'starting' | 'ready' | 'stopped' | 'error'>();
@@ -118,17 +118,17 @@ export class PersistentExecutor implements vscode.Disposable {
    * @param profileName - Databricks profile name to use for authentication
    */
   constructor(pythonPath: string, extensionPath: string, workingDirectory?: string, profileName?: string) {
-    this.pythonPath = pythonPath;
-    this.kernelScriptPath = path.join(extensionPath, 'dist', 'python', 'kernel_runner.py');
-    this.workingDirectory = workingDirectory || process.cwd();
-    this.profileName = profileName;
+    this._pythonPath = pythonPath;
+    this._kernelScriptPath = path.join(extensionPath, 'dist', 'python', 'kernel_runner.py');
+    this._workingDirectory = workingDirectory || process.cwd();
+    this._profileName = profileName;
   }
 
   /**
    * Start the Python process
    */
   async start(): Promise<boolean> {
-    if (this.process) {
+    if (this._process) {
       return true; // Already running
     }
 
@@ -136,29 +136,29 @@ export class PersistentExecutor implements vscode.Disposable {
 
     // Check if debug mode is enabled via environment variable (developer-only)
     // Set DATABRICKS_KERNEL_DEBUG=true to enable verbose logging
-    this.debugMode = process.env.DATABRICKS_KERNEL_DEBUG === 'true';
+    this._debugMode = process.env.DATABRICKS_KERNEL_DEBUG === 'true';
 
-    if (this.debugMode) {
+    if (this._debugMode) {
       console.debug(`[Executor] Starting Python process:`);
-      console.debug(`[Executor]   Python: ${this.pythonPath}`);
-      console.debug(`[Executor]   Script: ${this.kernelScriptPath}`);
-      console.debug(`[Executor]   CWD: ${this.workingDirectory}`);
+      console.debug(`[Executor]   Python: ${this._pythonPath}`);
+      console.debug(`[Executor]   Script: ${this._kernelScriptPath}`);
+      console.debug(`[Executor]   CWD: ${this._workingDirectory}`);
     }
 
     return new Promise((resolve) => {
       try {
         // Build environment with optional Databricks profile
         const env: NodeJS.ProcessEnv = { ...process.env };
-        if (this.profileName) {
-          env.DATABRICKS_CONFIG_PROFILE = this.profileName;
+        if (this._profileName) {
+          env.DATABRICKS_CONFIG_PROFILE = this._profileName;
         }
         // Pass debug mode to Python kernel
-        if (this.debugMode) {
+        if (this._debugMode) {
           env.DATABRICKS_KERNEL_DEBUG = 'true';
         }
 
-        this.process = cp.spawn(this.pythonPath, [this.kernelScriptPath], {
-          cwd: this.workingDirectory,
+        this._process = cp.spawn(this._pythonPath, [this._kernelScriptPath], {
+          cwd: this._workingDirectory,
           env,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
@@ -174,34 +174,34 @@ export class PersistentExecutor implements vscode.Disposable {
 
         // Set up readline for stdout IMMEDIATELY and synchronously
         // This must happen before any async operations to avoid missing the ready signal
-        if (this.process.stdout) {
+        if (this._process.stdout) {
           // Pause the stream to prevent data loss before readline is ready
-          this.process.stdout.pause();
+          this._process.stdout.pause();
 
-          this.readlineInterface = readline.createInterface({
-            input: this.process.stdout,
+          this._readlineInterface = readline.createInterface({
+            input: this._process.stdout,
             crlfDelay: Infinity,
           });
 
-          this.readlineInterface.on('line', (line) => {
+          this._readlineInterface.on('line', (line) => {
             this.handleOutput(line);
           });
 
           // Resume the stream now that readline is listening
-          this.process.stdout.resume();
+          this._process.stdout.resume();
         }
 
         // Handle stderr - only log in debug mode or for non-debug messages
-        this.process.stderr?.on('data', (data) => {
+        this._process.stderr?.on('data', (data) => {
           const output = data.toString();
           // Filter out kernel debug messages unless debug mode is enabled
-          if (this.debugMode || !output.includes('[KERNEL DEBUG]')) {
+          if (this._debugMode || !output.includes('[KERNEL DEBUG]')) {
             console.error('[Python Kernel stderr]:', output);
           }
         });
 
         // Handle process errors
-        this.process.on('error', (error) => {
+        this._process.on('error', (error) => {
           console.error('[Python Kernel error]:', error);
           this._onDidChangeState.fire('error');
           this.cleanup();
@@ -209,14 +209,14 @@ export class PersistentExecutor implements vscode.Disposable {
         });
 
         // Handle process exit
-        this.process.on('exit', (code, signal) => {
-          if (this.debugMode) {
+        this._process.on('exit', (code, signal) => {
+          if (this._debugMode) {
             console.debug(`[Python Kernel] Process exited with code ${code}, signal ${signal}`);
           }
           this._onDidChangeState.fire('stopped');
           this.cleanup();
           // If process exits before ready, resolve with false
-          if (!this.isReady) {
+          if (!this._isReady) {
             resolveOnce(false);
           }
         });
@@ -228,7 +228,7 @@ export class PersistentExecutor implements vscode.Disposable {
           .getConfiguration('databricks-notebook')
           .get<number>('kernelStartupTimeout', STARTUP_TIMEOUT_DEFAULT);
         const readyTimeout = setTimeout(() => {
-          if (!this.isReady) {
+          if (!this._isReady) {
             console.error(`[Python Kernel] Timeout waiting for ready signal (${startupTimeout}ms)`);
             clearInterval(checkReady);
             this.stop();
@@ -238,7 +238,7 @@ export class PersistentExecutor implements vscode.Disposable {
 
         // Check for ready signal more frequently
         const checkReady = setInterval(() => {
-          if (this.isReady) {
+          if (this._isReady) {
             clearTimeout(readyTimeout);
             clearInterval(checkReady);
             resolveOnce(true);
@@ -261,11 +261,11 @@ export class PersistentExecutor implements vscode.Disposable {
       const response: KernelResponse = JSON.parse(line);
 
       if (response.type === 'ready') {
-        this.isReady = true;
+        this._isReady = true;
         this._onDidChangeState.fire('ready');
         // Log Python info (Python protocol uses snake_case) - only in debug mode
         // eslint-disable-next-line @typescript-eslint/naming-convention
-        if (this.debugMode && (response as { python_info?: string }).python_info) {
+        if (this._debugMode && (response as { python_info?: string }).python_info) {
           // eslint-disable-next-line @typescript-eslint/naming-convention
           console.debug(`[Executor] ${(response as { python_info?: string }).python_info}`);
         }
@@ -275,7 +275,7 @@ export class PersistentExecutor implements vscode.Disposable {
           lastVenvInfo = response.venv_info;
           if (response.venv_info.is_venv) {
             const venvName = response.venv_info.venv_name || 'venv';
-            if (this.debugMode) {
+            if (this._debugMode) {
               console.debug(`[Executor] Using virtual environment: ${venvName} (${response.venv_info.venv_path})`);
             }
             // Show informational message about venv
@@ -286,7 +286,7 @@ export class PersistentExecutor implements vscode.Disposable {
         // Store and log databricks-connect version
         if (response.databricks_connect_version) {
           lastDbConnectVersion = response.databricks_connect_version;
-          if (this.debugMode) {
+          if (this._debugMode) {
             console.debug(`[Executor] databricks-connect version: ${response.databricks_connect_version}`);
           }
         }
@@ -294,7 +294,7 @@ export class PersistentExecutor implements vscode.Disposable {
         // Store and log spark status
         if (response.spark_status) {
           lastSparkStatus = response.spark_status;
-          if (this.debugMode) {
+          if (this._debugMode) {
             console.debug(`[Executor] ${response.spark_status}`);
           }
           // Show notification for spark status
@@ -307,10 +307,10 @@ export class PersistentExecutor implements vscode.Disposable {
         return;
       }
 
-      if (response.id && this.pendingRequests.has(response.id)) {
-        const pending = this.pendingRequests.get(response.id)!;
+      if (response.id && this._pendingRequests.has(response.id)) {
+        const pending = this._pendingRequests.get(response.id)!;
         clearTimeout(pending.timeout);
-        this.pendingRequests.delete(response.id);
+        this._pendingRequests.delete(response.id);
         pending.resolve(response);
       }
     } catch (error) {
@@ -347,7 +347,7 @@ export class PersistentExecutor implements vscode.Disposable {
    * @returns ExecutionResult
    */
   async execute(code: string, timeout: number = 60000): Promise<ExecutionResult> {
-    if (!this.process || !this.isReady) {
+    if (!this._process || !this._isReady) {
       const started = await this.start();
       if (!started) {
         return {
@@ -359,7 +359,7 @@ export class PersistentExecutor implements vscode.Disposable {
       }
     }
 
-    const requestId = `exec-${++this.requestCounter}`;
+    const requestId = `exec-${++this._requestCounter}`;
     const request: KernelRequest = {
       id: requestId,
       command: 'execute',
@@ -391,11 +391,11 @@ export class PersistentExecutor implements vscode.Disposable {
    * Reset the Python namespace
    */
   async reset(): Promise<boolean> {
-    if (!this.process || !this.isReady) {
+    if (!this._process || !this._isReady) {
       return true; // Nothing to reset
     }
 
-    const requestId = `reset-${++this.requestCounter}`;
+    const requestId = `reset-${++this._requestCounter}`;
     const request: KernelRequest = {
       id: requestId,
       command: 'reset',
@@ -413,11 +413,11 @@ export class PersistentExecutor implements vscode.Disposable {
    * Get variables in the namespace
    */
   async getVariables(): Promise<Record<string, { type: string; repr: string }>> {
-    if (!this.process || !this.isReady) {
+    if (!this._process || !this._isReady) {
       return {};
     }
 
-    const requestId = `vars-${++this.requestCounter}`;
+    const requestId = `vars-${++this._requestCounter}`;
     const request: KernelRequest = {
       id: requestId,
       command: 'variables',
@@ -435,11 +435,11 @@ export class PersistentExecutor implements vscode.Disposable {
    * Check if the kernel is alive
    */
   async ping(): Promise<boolean> {
-    if (!this.process || !this.isReady) {
+    if (!this._process || !this._isReady) {
       return false;
     }
 
-    const requestId = `ping-${++this.requestCounter}`;
+    const requestId = `ping-${++this._requestCounter}`;
     const request: KernelRequest = {
       id: requestId,
       command: 'ping',
@@ -458,24 +458,24 @@ export class PersistentExecutor implements vscode.Disposable {
    */
   private sendRequest(request: KernelRequest, timeout: number): Promise<KernelResponse> {
     return new Promise((resolve, reject) => {
-      if (!this.process?.stdin) {
+      if (!this._process?.stdin) {
         reject(new Error('Process not running'));
         return;
       }
 
       const timeoutHandle = setTimeout(() => {
-        this.pendingRequests.delete(request.id);
+        this._pendingRequests.delete(request.id);
         reject(new Error('Execution timeout'));
       }, timeout);
 
-      this.pendingRequests.set(request.id, {
+      this._pendingRequests.set(request.id, {
         resolve,
         reject,
         timeout: timeoutHandle,
       });
 
       const requestLine = JSON.stringify(request) + '\n';
-      this.process.stdin.write(requestLine);
+      this._process.stdin.write(requestLine);
     });
   }
 
@@ -483,8 +483,8 @@ export class PersistentExecutor implements vscode.Disposable {
    * Interrupt current execution
    */
   interrupt(): void {
-    if (this.process) {
-      this.process.kill('SIGINT');
+    if (this._process) {
+      this._process.kill('SIGINT');
     }
   }
 
@@ -493,9 +493,9 @@ export class PersistentExecutor implements vscode.Disposable {
    */
   stop(): void {
     this.cleanup();
-    if (this.process) {
-      this.process.kill('SIGTERM');
-      this.process = null;
+    if (this._process) {
+      this._process.kill('SIGTERM');
+      this._process = null;
     }
   }
 
@@ -513,8 +513,8 @@ export class PersistentExecutor implements vscode.Disposable {
    * @param profileName - Databricks profile name to use
    */
   async setProfile(profileName: string | undefined): Promise<void> {
-    if (this.profileName !== profileName) {
-      this.profileName = profileName;
+    if (this._profileName !== profileName) {
+      this._profileName = profileName;
       if (this.isRunning()) {
         await this.restart();
       }
@@ -525,26 +525,26 @@ export class PersistentExecutor implements vscode.Disposable {
    * Check if the process is running
    */
   isRunning(): boolean {
-    return this.process !== null && this.isReady;
+    return this._process !== null && this._isReady;
   }
 
   /**
    * Clean up resources
    */
   private cleanup(): void {
-    this.isReady = false;
+    this._isReady = false;
 
     // Reject all pending requests
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [id, pending] of this._pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error('Process terminated'));
-      this.pendingRequests.delete(id);
+      this._pendingRequests.delete(id);
     }
 
     // Close readline interface
-    if (this.readlineInterface) {
-      this.readlineInterface.close();
-      this.readlineInterface = null;
+    if (this._readlineInterface) {
+      this._readlineInterface.close();
+      this._readlineInterface = null;
     }
   }
 

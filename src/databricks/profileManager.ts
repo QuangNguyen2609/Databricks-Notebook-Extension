@@ -11,11 +11,11 @@ export interface DatabricksProfile {
 }
 
 export class ProfileManager implements vscode.Disposable {
-  private profiles: Map<string, DatabricksProfile> = new Map();
-  private selectedProfileName: string | null = null;
-  private configPath: string;
-  private fileWatcher: vscode.FileSystemWatcher | null = null;
-  private context: vscode.ExtensionContext;
+  private _profiles: Map<string, DatabricksProfile> = new Map();
+  private _selectedProfileName: string | null = null;
+  private _configPath: string;
+  private _fileWatcher: vscode.FileSystemWatcher | null = null;
+  private _context: vscode.ExtensionContext;
 
   private _onDidChangeProfile = new vscode.EventEmitter<string | null>();
   readonly onDidChangeProfile = this._onDidChangeProfile.event;
@@ -24,8 +24,8 @@ export class ProfileManager implements vscode.Disposable {
   readonly onDidChangeProfiles = this._onDidChangeProfiles.event;
 
   constructor(context: vscode.ExtensionContext) {
-    this.context = context;
-    this.configPath = path.join(os.homedir(), '.databrickscfg');
+    this._context = context;
+    this._configPath = path.join(os.homedir(), '.databrickscfg');
 
     // Set up file watcher for config file changes
     this.setupFileWatcher();
@@ -33,12 +33,12 @@ export class ProfileManager implements vscode.Disposable {
 
   private setupFileWatcher(): void {
     try {
-      const configDir = path.dirname(this.configPath);
-      this.fileWatcher = vscode.workspace.createFileSystemWatcher(
+      const configDir = path.dirname(this._configPath);
+      this._fileWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(configDir, '.databrickscfg')
       );
 
-      this.fileWatcher.onDidChange(async () => {
+      this._fileWatcher.onDidChange(async () => {
         try {
           await this.loadProfiles();
         } catch (error) {
@@ -46,7 +46,7 @@ export class ProfileManager implements vscode.Disposable {
         }
       });
 
-      this.fileWatcher.onDidCreate(async () => {
+      this._fileWatcher.onDidCreate(async () => {
         try {
           await this.loadProfiles();
         } catch (error) {
@@ -54,8 +54,8 @@ export class ProfileManager implements vscode.Disposable {
         }
       });
 
-      this.fileWatcher.onDidDelete(() => {
-        this.profiles.clear();
+      this._fileWatcher.onDidDelete(() => {
+        this._profiles.clear();
         this._onDidChangeProfiles.fire();
       });
     } catch (error) {
@@ -64,24 +64,24 @@ export class ProfileManager implements vscode.Disposable {
   }
 
   async loadProfiles(): Promise<void> {
-    this.profiles.clear();
+    this._profiles.clear();
 
     try {
-      const content = await fs.promises.readFile(this.configPath, 'utf-8');
+      const content = await fs.promises.readFile(this._configPath, 'utf-8');
       this.parseConfigFile(content);
 
       // Load persisted profile selection
-      const savedProfile = this.context.workspaceState.get<string>('databricks.selectedProfile');
-      if (savedProfile && this.profiles.has(savedProfile)) {
-        this.selectedProfileName = savedProfile;
+      const savedProfile = this._context.workspaceState.get<string>('databricks.selectedProfile');
+      if (savedProfile && this._profiles.has(savedProfile)) {
+        this._selectedProfileName = savedProfile;
       } else {
         // Check for default profile from settings
         const config = vscode.workspace.getConfiguration('databricks-notebook');
         const defaultProfile = config.get<string>('defaultProfile');
-        if (defaultProfile && this.profiles.has(defaultProfile)) {
-          this.selectedProfileName = defaultProfile;
+        if (defaultProfile && this._profiles.has(defaultProfile)) {
+          this._selectedProfileName = defaultProfile;
         } else {
-          this.selectedProfileName = null;
+          this._selectedProfileName = null;
         }
       }
 
@@ -115,7 +115,7 @@ export class ProfileManager implements vscode.Disposable {
       if (profileMatch) {
         // Save previous profile if exists
         if (currentProfile && currentProfileData.host) {
-          this.profiles.set(currentProfile, {
+          this._profiles.set(currentProfile, {
             name: currentProfile,
             host: currentProfileData.host,
             authType: currentProfileData.authType,
@@ -151,7 +151,7 @@ export class ProfileManager implements vscode.Disposable {
 
     // Save last profile
     if (currentProfile && currentProfileData.host) {
-      this.profiles.set(currentProfile, {
+      this._profiles.set(currentProfile, {
         name: currentProfile,
         host: currentProfileData.host,
         authType: currentProfileData.authType,
@@ -161,41 +161,41 @@ export class ProfileManager implements vscode.Disposable {
   }
 
   async selectProfile(profileName: string): Promise<void> {
-    if (!this.profiles.has(profileName)) {
+    if (!this._profiles.has(profileName)) {
       vscode.window.showErrorMessage(`Profile "${profileName}" not found`);
       return;
     }
 
-    this.selectedProfileName = profileName;
+    this._selectedProfileName = profileName;
 
     // Persist selection in workspace state
-    await this.context.workspaceState.update('databricks.selectedProfile', profileName);
+    await this._context.workspaceState.update('databricks.selectedProfile', profileName);
 
     // Emit change event - KernelManager will show notification about kernel restart
     this._onDidChangeProfile.fire(profileName);
   }
 
   getSelectedProfile(): DatabricksProfile | null {
-    if (!this.selectedProfileName) {
+    if (!this._selectedProfileName) {
       return null;
     }
-    return this.profiles.get(this.selectedProfileName) || null;
+    return this._profiles.get(this._selectedProfileName) || null;
   }
 
   getSelectedProfileName(): string | null {
-    return this.selectedProfileName;
+    return this._selectedProfileName;
   }
 
   getAllProfiles(): DatabricksProfile[] {
-    return Array.from(this.profiles.values());
+    return Array.from(this._profiles.values());
   }
 
   hasProfiles(): boolean {
-    return this.profiles.size > 0;
+    return this._profiles.size > 0;
   }
 
   dispose(): void {
-    this.fileWatcher?.dispose();
+    this._fileWatcher?.dispose();
     this._onDidChangeProfile.dispose();
     this._onDidChangeProfiles.dispose();
   }

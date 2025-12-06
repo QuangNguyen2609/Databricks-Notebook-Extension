@@ -44,11 +44,11 @@ let catalogService: CatalogService | undefined;
 let profileManager: ProfileManager | undefined;
 
 // Track documents currently being processed to avoid race conditions
-const processingDocuments = new Set<string>();
+const PROCESSING_DOCUMENTS = new Set<string>();
 
 // Track URIs currently being viewed as raw text (session-based)
 // This prevents auto-open from re-opening them as notebooks during the same session
-const viewingAsRawText = new Set<string>();
+const VIEWING_AS_RAW_TEXT = new Set<string>();
 
 /**
  * Extension activation
@@ -173,13 +173,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
-  // Clear viewingAsRawText flag when text editor tab is closed
+  // Clear VIEWING_AS_RAW_TEXT flag when text editor tab is closed
   // This allows the file to be auto-opened as notebook when reopened
   context.subscriptions.push(
     vscode.window.tabGroups.onDidChangeTabs((event) => {
       for (const closedTab of event.closed) {
         if (closedTab.input instanceof vscode.TabInputText) {
-          viewingAsRawText.delete(closedTab.input.uri.toString());
+          VIEWING_AS_RAW_TEXT.delete(closedTab.input.uri.toString());
         }
       }
     })
@@ -203,7 +203,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Clean up autoDetectedCells when notebook is closed to prevent memory leaks
+  // Clean up AUTO_DETECTED_CELLS when notebook is closed to prevent memory leaks
   context.subscriptions.push(
     vscode.workspace.onDidCloseNotebookDocument((notebook) => {
       if (notebook.notebookType !== 'databricks-notebook') {
@@ -211,9 +211,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       // Clean up entries for this notebook by matching the notebook path in cell URIs
       const notebookPath = notebook.uri.fsPath;
-      for (const key of autoDetectedCells) {
+      for (const key of AUTO_DETECTED_CELLS) {
         if (key.includes(notebookPath)) {
-          autoDetectedCells.delete(key);
+          AUTO_DETECTED_CELLS.delete(key);
         }
       }
     })
@@ -273,14 +273,14 @@ async function openAsRawText(uri?: vscode.Uri): Promise<void> {
 
   // Mark this URI as being viewed as raw text (session-based)
   // This is cleared when the text editor tab is closed
-  viewingAsRawText.add(uriString);
+  VIEWING_AS_RAW_TEXT.add(uriString);
 
   try {
     const tabInfo = findNotebookTab(uriString);
     await replaceTabWithView(fileUri, tabInfo, 'default');
   } catch (error) {
     // Clean up on error
-    viewingAsRawText.delete(uriString);
+    VIEWING_AS_RAW_TEXT.delete(uriString);
     vscode.window.showErrorMessage(`Failed to open as text: ${error}`);
   }
 }
@@ -323,12 +323,12 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
   const uriString = document.uri.toString();
 
   // Skip if already processing this document (avoid race conditions)
-  if (processingDocuments.has(uriString)) {
+  if (PROCESSING_DOCUMENTS.has(uriString)) {
     return;
   }
 
   // Skip if user explicitly chose to view as raw text
-  if (viewingAsRawText.has(uriString)) {
+  if (VIEWING_AS_RAW_TEXT.has(uriString)) {
     return;
   }
 
@@ -344,7 +344,7 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
 
   if (autoOpen) {
     // Mark as processing to prevent duplicate handling
-    processingDocuments.add(uriString);
+    PROCESSING_DOCUMENTS.add(uriString);
 
     try {
       // Use replaceTabWithView for unified close-then-open pattern
@@ -353,12 +353,12 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     } finally {
       // Clear processing flag after a delay to handle any remaining events
       setTimeout(() => {
-        processingDocuments.delete(uriString);
+        PROCESSING_DOCUMENTS.delete(uriString);
       }, 500);
     }
   } else if (showNotification) {
     // Mark as processing
-    processingDocuments.add(uriString);
+    PROCESSING_DOCUMENTS.add(uriString);
 
     try {
       // Show notification
@@ -379,7 +379,7 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
     } finally {
       // Clear processing flag after a delay
       setTimeout(() => {
-        processingDocuments.delete(uriString);
+        PROCESSING_DOCUMENTS.delete(uriString);
       }, 500);
     }
   }
@@ -387,7 +387,7 @@ async function handleDocumentOpen(document: vscode.TextDocument): Promise<void> 
 
 // Track cells that have been auto-detected to avoid repeated changes
 // Uses cell document URI which is stable across index changes
-const autoDetectedCells = new Set<string>();
+const AUTO_DETECTED_CELLS = new Set<string>();
 
 /**
  * Ensure a cell has the required magic command in its content
@@ -422,7 +422,7 @@ async function ensureMagicCommand(
     enterEditMode: true,
     moveCursorToEnd: true,
     trackingKey: cellKey,
-    trackingSet: autoDetectedCells,
+    trackingSet: AUTO_DETECTED_CELLS,
   });
 }
 
@@ -442,7 +442,7 @@ async function handleNewCell(notebook: vscode.NotebookDocument, cell: vscode.Not
   const cellKey = cell.document.uri.toString();
 
   // Skip if already processed
-  if (autoDetectedCells.has(cellKey)) {
+  if (AUTO_DETECTED_CELLS.has(cellKey)) {
     return;
   }
 
@@ -483,7 +483,7 @@ async function removeMagicCommand(
   }, {
     enterEditMode: true,
     trackingKey: cellKey,
-    trackingSet: autoDetectedCells,
+    trackingSet: AUTO_DETECTED_CELLS,
   });
 }
 
@@ -520,7 +520,7 @@ async function convertCellToLanguage(
   }, {
     enterEditMode: true,
     trackingKey: cellKey,
-    trackingSet: autoDetectedCells,
+    trackingSet: AUTO_DETECTED_CELLS,
   });
 }
 
@@ -555,7 +555,7 @@ async function convertToPythonCell(
   }, {
     enterEditMode: true,
     trackingKey: cellKey,
-    trackingSet: autoDetectedCells,
+    trackingSet: AUTO_DETECTED_CELLS,
   });
 }
 
@@ -613,7 +613,7 @@ async function handleCellContentChange(
   // This happens when: 1) user changes language via picker, 2) user manually removes magic
   if (requiredMagic && !contentStartsWithMagic(content, requiredMagic)) {
     // Skip if we just processed this cell to avoid infinite loops
-    if (autoDetectedCells.has(cellKey)) {
+    if (AUTO_DETECTED_CELLS.has(cellKey)) {
       return;
     }
 
@@ -639,7 +639,7 @@ async function handleCellContentChange(
 
   // Handle language change FROM magic-command language to Python
   // If language is now Python but content still has a magic command, handle it
-  if (languageId === 'python' && !autoDetectedCells.has(cellKey)) {
+  if (languageId === 'python' && !AUTO_DETECTED_CELLS.has(cellKey)) {
     // Check if content starts with any magic command
     // Use sorted list (longest first) to prevent %r matching %run
     for (const magic of SORTED_MAGIC_COMMANDS) {
@@ -691,7 +691,7 @@ async function handleNotebookCellChanges(event: vscode.NotebookDocumentChangeEve
   // 1. Handle removed cells - cleanup tracking state
   for (const contentChange of event.contentChanges) {
     for (const removedCell of contentChange.removedCells) {
-      autoDetectedCells.delete(removedCell.document.uri.toString());
+      AUTO_DETECTED_CELLS.delete(removedCell.document.uri.toString());
     }
   }
 
@@ -760,9 +760,9 @@ async function showProfileQuickPick(manager: ProfileManager): Promise<void> {
  */
 export function deactivate(): void {
   console.log('Databricks Notebook Viewer is now deactivated');
-  processingDocuments.clear();
-  viewingAsRawText.clear();
-  autoDetectedCells.clear();
+  PROCESSING_DOCUMENTS.clear();
+  VIEWING_AS_RAW_TEXT.clear();
+  AUTO_DETECTED_CELLS.clear();
 
   // Clear catalog cache
   catalogService?.clearCache();
