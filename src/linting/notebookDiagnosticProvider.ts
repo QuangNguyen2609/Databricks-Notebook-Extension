@@ -6,6 +6,8 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { VirtualDocumentGenerator, VirtualDocument } from './virtualDocumentGenerator';
 import { DiagnosticMapper } from './diagnosticMapper';
 import { extractErrorMessage } from '../utils/errorHandler';
@@ -136,11 +138,133 @@ export class NotebookDiagnosticProvider implements vscode.Disposable {
     }
 
     try {
+      // Update Pylance extraPaths for local module imports
+      await this.updatePylanceExtraPaths(notebook);
+
       await this.updateDiagnostics(notebook);
     } catch (error) {
       console.error('[NotebookDiagnosticProvider] Failed to analyze notebook:', error);
       showErrorMessage(`Failed to analyze notebook for linting: ${extractErrorMessage(error)}`);
     }
+  }
+
+  /**
+   * Update Pylance extraPaths configuration for local module imports.
+   * This allows Pylance to recognize imports from local .py files.
+   * @param notebook - The notebook being analyzed
+   */
+  private async updatePylanceExtraPaths(notebook: vscode.NotebookDocument): Promise<void> {
+    try {
+      const config = vscode.workspace.getConfiguration('python.analysis');
+      const currentPaths = config.get<string[]>('extraPaths', []);
+
+      const notebookDir = path.dirname(notebook.uri.fsPath);
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(notebook.uri);
+
+      const newPaths: string[] = [...currentPaths];
+      let pathsChanged = false;
+
+      // Add notebook directory if not present
+      if (!newPaths.includes(notebookDir)) {
+        newPaths.push(notebookDir);
+        pathsChanged = true;
+      }
+
+      // Add workspace root if not present
+      if (workspaceFolder && !newPaths.includes(workspaceFolder.uri.fsPath)) {
+        newPaths.push(workspaceFolder.uri.fsPath);
+        pathsChanged = true;
+      }
+
+      // Discover and add package roots (directories containing packages with __init__.py)
+      const packageRoots = this.discoverPackageRoots(notebookDir, workspaceFolder?.uri.fsPath);
+      for (const root of packageRoots) {
+        if (!newPaths.includes(root)) {
+          newPaths.push(root);
+          pathsChanged = true;
+        }
+      }
+
+      // Update configuration if changed
+      if (pathsChanged) {
+        await config.update('extraPaths', newPaths, vscode.ConfigurationTarget.Workspace);
+        console.log('[NotebookDiagnosticProvider] Updated python.analysis.extraPaths:', newPaths);
+      }
+    } catch (error) {
+      // Non-fatal - linting will still work, just without local module resolution
+      console.debug('[NotebookDiagnosticProvider] Failed to update Pylance extraPaths:', error);
+    }
+  }
+
+  /**
+   * Discover package roots by traversing up from the notebook directory.
+   * A package root is the parent directory of a folder containing __init__.py.
+   * @param startDir - Starting directory (notebook's parent directory)
+   * @param workspaceRoot - Optional workspace root to limit traversal
+   * @returns Array of paths to add as package roots
+   */
+  private discoverPackageRoots(startDir: string, workspaceRoot?: string): string[] {
+    const packageRoots: Set<string> = new Set();
+
+    if (!startDir || !fs.existsSync(startDir)) {
+      return [];
+    }
+
+    let current = path.resolve(startDir);
+    const normalizedWorkspaceRoot = workspaceRoot ? path.resolve(workspaceRoot) : undefined;
+
+    // Walk up the directory tree
+    while (current && current !== path.dirname(current)) {
+      // Stop if we've reached or passed the workspace root
+      if (normalizedWorkspaceRoot && !current.startsWith(normalizedWorkspaceRoot)) {
+        break;
+      }
+
+      // Check if current directory is a package (has __init__.py)
+      const initPy = path.join(current, '__init__.py');
+      try {
+        if (fs.existsSync(initPy) && fs.statSync(initPy).isFile()) {
+          // This directory is a package - its parent should be in path
+          const parent = path.dirname(current);
+          if (parent && fs.existsSync(parent)) {
+            // Don't add if parent is outside workspace
+            if (!normalizedWorkspaceRoot ||
+                parent.startsWith(normalizedWorkspaceRoot) ||
+                parent === normalizedWorkspaceRoot) {
+              packageRoots.add(parent);
+            }
+          }
+        }
+      } catch {
+        // Ignore access errors
+      }
+
+      // Check sibling directories for packages
+      try {
+        const items = fs.readdirSync(current);
+        for (const item of items) {
+          const itemPath = path.join(current, item);
+          try {
+            if (fs.statSync(itemPath).isDirectory()) {
+              const itemInit = path.join(itemPath, '__init__.py');
+              if (fs.existsSync(itemInit) && fs.statSync(itemInit).isFile()) {
+                // Found a sibling package, add current as package root
+                packageRoots.add(current);
+                break;
+              }
+            }
+          } catch {
+            // Ignore access errors for individual items
+          }
+        }
+      } catch {
+        // Ignore directory read errors
+      }
+
+      current = path.dirname(current);
+    }
+
+    return Array.from(packageRoots);
   }
 
   /**

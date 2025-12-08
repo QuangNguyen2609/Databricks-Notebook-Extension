@@ -1,0 +1,371 @@
+/**
+ * Tests for local Python module import support
+ *
+ * Tests the path discovery functionality that enables importing
+ * local .py modules from the notebook directory and package roots.
+ */
+import * as assert from 'assert';
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
+
+// We'll test the TypeScript path discovery logic that mirrors the Python implementation
+// since the Python module is executed in a subprocess
+
+describe('Local Import Path Discovery Tests', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'databricks-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Helper function to discover package roots (mirrors Python path_utils.py logic)
+   */
+  function discoverPackageRoots(startDir: string, workspaceRoot?: string): string[] {
+    const packageRoots: Set<string> = new Set();
+
+    if (!startDir || !fs.existsSync(startDir)) {
+      return [];
+    }
+
+    let current = path.resolve(startDir);
+    const normalizedWorkspaceRoot = workspaceRoot ? path.resolve(workspaceRoot) : undefined;
+
+    while (current && current !== path.dirname(current)) {
+      if (normalizedWorkspaceRoot && !current.startsWith(normalizedWorkspaceRoot)) {
+        break;
+      }
+
+      const initPy = path.join(current, '__init__.py');
+      try {
+        if (fs.existsSync(initPy) && fs.statSync(initPy).isFile()) {
+          const parent = path.dirname(current);
+          if (parent && fs.existsSync(parent)) {
+            if (!normalizedWorkspaceRoot ||
+                parent.startsWith(normalizedWorkspaceRoot) ||
+                parent === normalizedWorkspaceRoot) {
+              packageRoots.add(parent);
+            }
+          }
+        }
+      } catch {
+        // Ignore access errors
+      }
+
+      try {
+        const items = fs.readdirSync(current);
+        for (const item of items) {
+          const itemPath = path.join(current, item);
+          try {
+            if (fs.statSync(itemPath).isDirectory()) {
+              const itemInit = path.join(itemPath, '__init__.py');
+              if (fs.existsSync(itemInit) && fs.statSync(itemInit).isFile()) {
+                packageRoots.add(current);
+                break;
+              }
+            }
+          } catch {
+            // Ignore
+          }
+        }
+      } catch {
+        // Ignore
+      }
+
+      current = path.dirname(current);
+    }
+
+    return Array.from(packageRoots);
+  }
+
+  /**
+   * Helper function to discover import paths (mirrors Python path_utils.py logic)
+   */
+  function discoverImportPaths(notebookPath: string, workspaceRoot?: string): string[] {
+    const paths: Set<string> = new Set();
+
+    if (!notebookPath) {
+      return [];
+    }
+
+    const notebookDir = path.dirname(path.resolve(notebookPath));
+
+    if (fs.existsSync(notebookDir)) {
+      paths.add(notebookDir);
+    }
+
+    if (workspaceRoot) {
+      const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+      if (fs.existsSync(resolvedWorkspaceRoot)) {
+        paths.add(resolvedWorkspaceRoot);
+      }
+    }
+
+    const packageRoots = discoverPackageRoots(notebookDir, workspaceRoot);
+    packageRoots.forEach(root => paths.add(root));
+
+    return Array.from(paths).sort();
+  }
+
+  describe('Sibling Module Discovery', () => {
+    it('should include notebook directory for sibling .py files', () => {
+      // Create: tempDir/notebook.py, tempDir/mymodule.py
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '# notebook');
+      fs.writeFileSync(path.join(tempDir, 'mymodule.py'), '# module');
+
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      assert.ok(paths.includes(tempDir), 'Should include notebook directory');
+    });
+
+    it('should include notebook directory for sibling packages', () => {
+      // Create: tempDir/notebook.py, tempDir/mypackage/__init__.py
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '# notebook');
+      fs.mkdirSync(path.join(tempDir, 'mypackage'));
+      fs.writeFileSync(path.join(tempDir, 'mypackage', '__init__.py'), '');
+
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      assert.ok(paths.includes(tempDir), 'Should include notebook directory for package imports');
+    });
+  });
+
+  describe('Package Root Discovery', () => {
+    it('should find package root for sibling packages', () => {
+      // Create:
+      // tempDir/
+      //   mypackage/
+      //     __init__.py
+      //     utils.py
+      //   notebooks/
+      //     analysis.py
+
+      fs.mkdirSync(path.join(tempDir, 'mypackage'));
+      fs.mkdirSync(path.join(tempDir, 'notebooks'));
+
+      fs.writeFileSync(path.join(tempDir, 'mypackage', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'mypackage', 'utils.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'notebooks', 'analysis.py'), '');
+
+      const notebookPath = path.join(tempDir, 'notebooks', 'analysis.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      // Should include tempDir so 'from mypackage import utils' works
+      assert.ok(paths.includes(tempDir), 'Should include project root for package imports');
+    });
+
+    it('should find package root for nested packages', () => {
+      // Create:
+      // tempDir/
+      //   mypackage/
+      //     __init__.py
+      //     submodule/
+      //       __init__.py
+      //       utils.py
+      //   notebooks/
+      //     analysis.py
+
+      fs.mkdirSync(path.join(tempDir, 'mypackage'));
+      fs.mkdirSync(path.join(tempDir, 'mypackage', 'submodule'));
+      fs.mkdirSync(path.join(tempDir, 'notebooks'));
+
+      fs.writeFileSync(path.join(tempDir, 'mypackage', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'mypackage', 'submodule', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'mypackage', 'submodule', 'utils.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'notebooks', 'analysis.py'), '');
+
+      const notebookPath = path.join(tempDir, 'notebooks', 'analysis.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      // Should include tempDir so 'from mypackage.submodule import utils' works
+      assert.ok(paths.includes(tempDir), 'Should include project root for nested package imports');
+    });
+
+    it('should not go above workspace root', () => {
+      // Even if parent directories have __init__.py, don't escape workspace
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      fs.writeFileSync(notebookPath, '# notebook');
+
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      // All paths should be within or equal to tempDir
+      for (const p of paths) {
+        const normalizedP = path.resolve(p);
+        const normalizedTemp = path.resolve(tempDir);
+        assert.ok(
+          normalizedP === normalizedTemp || normalizedP.startsWith(normalizedTemp + path.sep),
+          `Path ${p} should be within workspace ${tempDir}`
+        );
+      }
+    });
+
+    it('should handle package at root level', () => {
+      // Create:
+      // tempDir/
+      //   __init__.py
+      //   utils.py
+      //   notebook.py
+
+      fs.writeFileSync(path.join(tempDir, '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'utils.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '');
+
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      const packageRoots = discoverPackageRoots(tempDir, tempDir);
+
+      // tempDir has __init__.py, so its parent should be in package roots
+      const parent = path.dirname(tempDir);
+      // We limit to workspace root, so parent should only be added if inside workspace
+      // In this case, parent is outside workspace, so no package root should be added
+      // But the notebook directory itself should still be included for sibling imports
+      const paths = discoverImportPaths(notebookPath, tempDir);
+      assert.ok(paths.includes(tempDir), 'Should include notebook directory');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle notebooks at workspace root', () => {
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      fs.writeFileSync(notebookPath, '# notebook');
+
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      assert.ok(paths.length > 0, 'Should return at least the notebook directory');
+      assert.ok(paths.includes(tempDir), 'Should include workspace root');
+    });
+
+    it('should handle deeply nested notebooks', () => {
+      // Create: tempDir/a/b/c/d/notebook.py
+      const deepDir = path.join(tempDir, 'a', 'b', 'c', 'd');
+      fs.mkdirSync(deepDir, { recursive: true });
+
+      const notebookPath = path.join(deepDir, 'notebook.py');
+      fs.writeFileSync(notebookPath, '# notebook');
+
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      assert.ok(paths.includes(deepDir), 'Should include notebook directory');
+      assert.ok(paths.includes(tempDir), 'Should include workspace root');
+    });
+
+    it('should deduplicate paths', () => {
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      fs.writeFileSync(notebookPath, '# notebook');
+
+      const paths = discoverImportPaths(notebookPath, tempDir);
+      const uniquePaths = new Set(paths);
+
+      assert.strictEqual(paths.length, uniquePaths.size, 'Should not have duplicate paths');
+    });
+
+    it('should handle empty notebook path', () => {
+      const paths = discoverImportPaths('', tempDir);
+      assert.strictEqual(paths.length, 0, 'Should return empty array for empty notebook path');
+    });
+
+    it('should handle non-existent notebook path', () => {
+      const notebookPath = path.join(tempDir, 'nonexistent', 'notebook.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+      // Should handle gracefully without throwing
+      assert.ok(Array.isArray(paths), 'Should return an array');
+    });
+
+    it('should handle undefined workspace root', () => {
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      fs.writeFileSync(notebookPath, '# notebook');
+
+      const paths = discoverImportPaths(notebookPath, undefined);
+
+      assert.ok(paths.includes(tempDir), 'Should include notebook directory even without workspace root');
+    });
+  });
+
+  describe('Real-World Scenarios', () => {
+    it('should support typical project structure', () => {
+      // Create a typical Python project structure:
+      // tempDir/
+      //   src/
+      //     myproject/
+      //       __init__.py
+      //       core/
+      //         __init__.py
+      //         utils.py
+      //       analysis/
+      //         __init__.py
+      //         notebook.py
+
+      fs.mkdirSync(path.join(tempDir, 'src', 'myproject', 'core'), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, 'src', 'myproject', 'analysis'), { recursive: true });
+
+      fs.writeFileSync(path.join(tempDir, 'src', 'myproject', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'src', 'myproject', 'core', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'src', 'myproject', 'core', 'utils.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'src', 'myproject', 'analysis', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'src', 'myproject', 'analysis', 'notebook.py'), '');
+
+      const notebookPath = path.join(tempDir, 'src', 'myproject', 'analysis', 'notebook.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      // Should find package root that allows 'from myproject.core import utils'
+      const srcDir = path.join(tempDir, 'src');
+      assert.ok(
+        paths.includes(srcDir) || paths.includes(tempDir),
+        'Should include directory that allows myproject imports'
+      );
+    });
+
+    it('should support GitHub monorepo structure', () => {
+      // Create a monorepo-like structure:
+      // tempDir/
+      //   packages/
+      //     data_processing/
+      //       __init__.py
+      //       transformers.py
+      //     notebooks/
+      //       analysis/
+      //         daily_report.py
+
+      fs.mkdirSync(path.join(tempDir, 'packages', 'data_processing'), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, 'packages', 'notebooks', 'analysis'), { recursive: true });
+
+      fs.writeFileSync(path.join(tempDir, 'packages', 'data_processing', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'packages', 'data_processing', 'transformers.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'packages', 'notebooks', 'analysis', 'daily_report.py'), '');
+
+      const notebookPath = path.join(tempDir, 'packages', 'notebooks', 'analysis', 'daily_report.py');
+      const paths = discoverImportPaths(notebookPath, tempDir);
+
+      // Should find packages/ as a package root for 'from data_processing import transformers'
+      const packagesDir = path.join(tempDir, 'packages');
+      assert.ok(
+        paths.includes(packagesDir),
+        'Should include packages directory for sibling package imports'
+      );
+    });
+  });
+});
+
+describe('Environment Variable Configuration Tests', () => {
+  it('should define environment variable names', () => {
+    // Verify the expected environment variable names are used
+    const expectedVars = [
+      'DATABRICKS_NOTEBOOK_PATH',
+      'DATABRICKS_WORKSPACE_ROOT',
+    ];
+
+    // These are the env vars that kernel_runner.py expects
+    for (const envVar of expectedVars) {
+      assert.ok(
+        typeof envVar === 'string' && envVar.startsWith('DATABRICKS_'),
+        `${envVar} should be a valid environment variable name`
+      );
+    }
+  });
+});

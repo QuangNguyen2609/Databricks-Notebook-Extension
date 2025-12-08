@@ -295,6 +295,40 @@ def main():
     # Get virtual environment info
     venv_info = get_venv_info()
 
+    # Setup import paths for local modules
+    added_import_paths = []
+    notebook_path = os.environ.get('DATABRICKS_NOTEBOOK_PATH', '')
+    workspace_root = os.environ.get('DATABRICKS_WORKSPACE_ROOT', '')
+
+    # Debug: Log the received paths
+    log_debug(f"DATABRICKS_NOTEBOOK_PATH: {notebook_path}")
+    log_debug(f"DATABRICKS_WORKSPACE_ROOT: {workspace_root}")
+
+    # Always add notebook directory to sys.path as a fallback
+    if notebook_path:
+        notebook_dir = os.path.dirname(os.path.abspath(notebook_path))
+        if notebook_dir and os.path.isdir(notebook_dir) and notebook_dir not in sys.path:
+            sys.path.insert(0, notebook_dir)
+            added_import_paths.append(notebook_dir)
+            log_debug(f"Added notebook directory to sys.path: {notebook_dir}")
+
+    # Try to use path_utils for more sophisticated package discovery
+    if notebook_path:
+        try:
+            from path_utils import setup_import_paths
+            extra_paths = setup_import_paths(notebook_path, workspace_root)
+            if extra_paths:
+                # Add any paths not already in our list
+                for p in extra_paths:
+                    if p not in added_import_paths:
+                        added_import_paths.append(p)
+                log_debug(f"Added import paths for local modules: {added_import_paths}")
+        except ImportError as e:
+            # Log to stderr so it's visible even without debug mode
+            print(f"[KERNEL] Warning: Could not import path_utils: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"[KERNEL] Warning: Error setting up import paths: {e}", file=sys.stderr)
+
     # Check databricks-connect compatibility
     db_compatible, db_version, db_warning = check_databricks_connect_compatibility()
 
@@ -317,6 +351,7 @@ def main():
         'venv_info': venv_info,
         'databricks_connect_version': db_version,
         'databricks_connect_compatible': db_compatible,
+        'added_import_paths': added_import_paths,
     }
     print(json.dumps(ready_signal), flush=True)
 

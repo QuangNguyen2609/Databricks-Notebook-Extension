@@ -97,6 +97,7 @@ export class PersistentExecutor implements vscode.Disposable {
   private _kernelScriptPath: string;
   private _workingDirectory: string;
   private _profileName: string | undefined;
+  private _notebookPath: string | undefined;
   private _isReady = false;
   private _debugMode = false;
   private _pendingRequests = new Map<string, {
@@ -127,12 +128,20 @@ export class PersistentExecutor implements vscode.Disposable {
    * @param extensionPath - Path to the extension directory (for kernel script)
    * @param workingDirectory - Working directory for code execution
    * @param profileName - Databricks profile name to use for authentication
+   * @param notebookPath - Path to the notebook file (for local module imports)
    */
-  constructor(pythonPath: string, extensionPath: string, workingDirectory?: string, profileName?: string) {
+  constructor(
+    pythonPath: string,
+    extensionPath: string,
+    workingDirectory?: string,
+    profileName?: string,
+    notebookPath?: string
+  ) {
     this._pythonPath = pythonPath;
     this._kernelScriptPath = path.join(extensionPath, 'dist', 'python', 'kernel_runner.py');
     this._workingDirectory = workingDirectory || process.cwd();
     this._profileName = profileName;
+    this._notebookPath = notebookPath;
   }
 
   /**
@@ -152,7 +161,12 @@ export class PersistentExecutor implements vscode.Disposable {
 
     return new Promise((resolve) => {
       try {
-        const env = buildKernelEnvironment(this._profileName, this._debugMode);
+        const env = buildKernelEnvironment(
+          this._profileName,
+          this._debugMode,
+          this._notebookPath,
+          this._workingDirectory
+        );
         this._process = this.spawnProcess(env);
 
         const resolveOnce = createSingleUseResolver(resolve);

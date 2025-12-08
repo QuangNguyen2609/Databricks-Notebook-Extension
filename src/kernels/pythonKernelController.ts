@@ -197,7 +197,8 @@ export class PythonKernelController implements vscode.Disposable {
           this._environment.path,
           this._extensionPath,
           this.getWorkingDirectory(notebook),
-          profileName
+          profileName,
+          notebook.uri.fsPath  // Pass notebook path for local module imports
         );
       }
 
@@ -411,7 +412,8 @@ export class PythonKernelController implements vscode.Disposable {
         this._environment.path,
         this._extensionPath,
         this.getWorkingDirectory(notebook),
-        profileName
+        profileName,
+        notebook.uri.fsPath  // Pass notebook path for local module imports
       );
     }
 

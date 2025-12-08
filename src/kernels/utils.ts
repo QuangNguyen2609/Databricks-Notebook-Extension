@@ -50,11 +50,15 @@ export interface KernelStatusInfo {
  * Build environment variables for Python kernel process
  * @param profileName - Optional Databricks profile name
  * @param debugMode - Whether debug mode is enabled
+ * @param notebookPath - Optional path to the notebook file (for local imports)
+ * @param workspaceRoot - Optional workspace root directory (for package discovery)
  * @returns Environment variables object
  */
 export function buildKernelEnvironment(
   profileName: string | undefined,
-  debugMode: boolean
+  debugMode: boolean,
+  notebookPath?: string,
+  workspaceRoot?: string
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
 
@@ -64,6 +68,15 @@ export function buildKernelEnvironment(
 
   if (debugMode) {
     env.DATABRICKS_KERNEL_DEBUG = 'true';
+  }
+
+  // Add paths for local module imports
+  if (notebookPath) {
+    env.DATABRICKS_NOTEBOOK_PATH = notebookPath;
+  }
+
+  if (workspaceRoot) {
+    env.DATABRICKS_WORKSPACE_ROOT = workspaceRoot;
   }
 
   return env;

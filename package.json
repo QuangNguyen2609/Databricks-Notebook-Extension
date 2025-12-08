@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "databricks-notebook-studio",
@@ -191,6 +191,16 @@
           "type": "boolean",
           "default": true,
           "description": "Enable live variable completions by querying the kernel for methods and properties of any variable."
+        },
+        "databricks-notebook.localImports.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable local Python module imports from notebook directory and workspace"
+        },
+        "databricks-notebook.localImports.discoverPackageRoots": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically discover and add package roots (directories containing packages with __init__.py)"
         }
       },
       "configurationDefaults": {
@@ -207,7 +217,7 @@
     "lint": "eslint src --ext ts --max-warnings 50",
     "lint:fix": "eslint src --ext ts --fix",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "tsc --declaration false --declarationMap false && mocha 'out/test/{parser,profileManager,codeTransform,constants,serializer,requestCache,catalogService,tabManager,cellOperations,notebookDiagnosticProvider,persistentExecutor,kernelManager,pythonKernelController,kernelControls,pythonCompletion,linting}.test.js'",
+    "test:unit": "tsc --declaration false --declarationMap false && mocha 'out/test/{parser,profileManager,codeTransform,constants,serializer,requestCache,catalogService,tabManager,cellOperations,notebookDiagnosticProvider,persistentExecutor,kernelManager,pythonKernelController,kernelControls,pythonCompletion,linting,localImports}.test.js'",
     "test:coverage": "nyc --reporter=lcov --reporter=text npm run test:unit",
     "ci": "npm run type-check && npm run lint && npm run test:unit && npm run compile"
   },

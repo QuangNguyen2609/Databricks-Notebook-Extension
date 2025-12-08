@@ -5,6 +5,13 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2025-12-08
+### Added
+- **Local Python Module Imports**: Enable importing local `.py` modules from the notebook directory and workspace
+- **Pylance IntelliSense for Local Modules**: Automatic Pylance configuration for local imports
+
+
+
 ## [0.3.7] - 2025-12-06
 
 ### Added
