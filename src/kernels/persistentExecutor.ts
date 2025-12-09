@@ -89,6 +89,33 @@ interface KernelResponse {
 }
 
 /**
+ * Widget input request from Python kernel
+ * Sent when dbutils.widgets.get() is called and needs user input
+ */
+interface WidgetInputRequest {
+  type: 'input_request';
+  id: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  widget_name: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  widget_type: 'text' | 'dropdown' | 'combobox' | 'multiselect';
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  default_value: string;
+  choices?: string[];
+  label: string;
+}
+
+/**
+ * Widget input response sent to Python kernel
+ */
+interface WidgetInputResponse {
+  type: 'input_response';
+  id: string;
+  value: string;
+  cancelled: boolean;
+}
+
+/**
  * Manages a persistent Python process for code execution
  */
 export class PersistentExecutor implements vscode.Disposable {
@@ -275,14 +302,21 @@ export class PersistentExecutor implements vscode.Disposable {
    */
   private handleOutput(line: string): void {
     try {
-      const response: KernelResponse = JSON.parse(line);
+      // Parse as generic object first to check type
+      const message = JSON.parse(line) as { type?: string };
 
-      if (response.type === 'ready') {
-        this.handleReadySignal(response);
+      if (message.type === 'ready') {
+        this.handleReadySignal(message as KernelResponse);
         return;
       }
 
-      this.handlePendingResponse(response);
+      // Handle widget input requests from Python
+      if (message.type === 'input_request') {
+        this.handleWidgetInputRequest(message as WidgetInputRequest);
+        return;
+      }
+
+      this.handlePendingResponse(message as KernelResponse);
     } catch (error) {
       console.error('[Python Kernel] Failed to parse output:', line, error);
     }
@@ -321,6 +355,102 @@ export class PersistentExecutor implements vscode.Disposable {
       clearTimeout(pending.timeout);
       this._pendingRequests.delete(response.id);
       pending.resolve(response);
+    }
+  }
+
+  /**
+   * Handle widget input request from Python kernel.
+   * Shows VS Code input dialog and sends response back to Python.
+   */
+  private async handleWidgetInputRequest(request: WidgetInputRequest): Promise<void> {
+    let value: string | undefined;
+
+    try {
+      switch (request.widget_type) {
+        case 'text':
+        case 'combobox':
+          // For text and combobox, show input box
+          // Combobox could show quick pick with custom input, but input box is simpler
+          value = await vscode.window.showInputBox({
+            prompt: request.label,
+            value: request.default_value,
+            placeHolder: `Enter value for widget "${request.widget_name}"`,
+            title: `Widget: ${request.widget_name}`,
+          });
+          break;
+
+        case 'dropdown':
+          // For dropdown, show quick pick with choices
+          if (request.choices && request.choices.length > 0) {
+            value = await vscode.window.showQuickPick(request.choices, {
+              placeHolder: request.label,
+              title: `Widget: ${request.widget_name}`,
+            });
+          } else {
+            // No choices, fall back to input box
+            value = await vscode.window.showInputBox({
+              prompt: request.label,
+              value: request.default_value,
+              placeHolder: `Enter value for widget "${request.widget_name}"`,
+            });
+          }
+          break;
+
+        case 'multiselect':
+          // For multiselect, show quick pick with multiple selection
+          if (request.choices && request.choices.length > 0) {
+            const selected = await vscode.window.showQuickPick(request.choices, {
+              placeHolder: request.label,
+              title: `Widget: ${request.widget_name}`,
+              canPickMany: true,
+            });
+            // Join selected values with comma (Databricks multiselect convention)
+            value = selected ? selected.join(',') : undefined;
+          } else {
+            value = await vscode.window.showInputBox({
+              prompt: request.label,
+              value: request.default_value,
+              placeHolder: `Enter comma-separated values for widget "${request.widget_name}"`,
+            });
+          }
+          break;
+
+        default:
+          // Unknown widget type, fall back to input box
+          value = await vscode.window.showInputBox({
+            prompt: request.label,
+            value: request.default_value,
+          });
+      }
+    } catch (error) {
+      console.error('[Python Kernel] Error showing widget input prompt:', error);
+      // On error, use default value
+      value = undefined;
+    }
+
+    // Send response back to Python
+    this.sendWidgetInputResponse({
+      type: 'input_response',
+      id: request.id,
+      value: value ?? request.default_value,
+      cancelled: value === undefined,
+    });
+  }
+
+  /**
+   * Send widget input response to Python kernel via stdin.
+   */
+  private sendWidgetInputResponse(response: WidgetInputResponse): void {
+    if (!this._process?.stdin) {
+      console.error('[Python Kernel] Cannot send input response - process not running');
+      return;
+    }
+
+    const responseLine = JSON.stringify(response) + '\n';
+    this._process.stdin.write(responseLine);
+
+    if (this._debugMode) {
+      console.debug('[Python Kernel] Sent widget input response:', response.id, response.cancelled ? '(cancelled)' : response.value);
     }
   }
 

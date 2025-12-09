@@ -5,6 +5,7 @@ This module provides functions to discover and configure Python import paths
 for local modules in Databricks notebooks. It handles:
 - Sibling .py files in the notebook directory
 - Python packages (folders with __init__.py)
+- Implicit packages (folders with .py files but no __init__.py) - Databricks style
 - Package roots for nested packages
 
 Usage:
@@ -13,7 +14,90 @@ Usage:
 """
 import os
 import sys
+import importlib.abc
+import importlib.machinery
+import importlib.util
 from typing import List, Set, Optional
+
+
+class DatabricksBackwardsCompatibleFinder(importlib.abc.MetaPathFinder):
+    """
+    Custom import finder that mimics Databricks' implicit package behavior.
+
+    Databricks allows importing from folders that contain .py files even without
+    __init__.py. This finder replicates that behavior for local development.
+
+    Example:
+        # Folder structure (no __init__.py in utils/):
+        # notebook.py
+        # utils/
+        #   langgraph_utils.py
+
+        # This import works in Databricks, and now works locally too:
+        from utils.langgraph_utils import some_function
+    """
+
+    def __init__(self, base_paths: List[str]):
+        """
+        Initialize the finder with base paths to search.
+
+        Args:
+            base_paths: List of directory paths to search for implicit packages
+        """
+        self.base_paths = [os.path.abspath(p) for p in base_paths]
+
+    def find_spec(self, fullname: str, path, target=None):
+        """
+        Find a module spec for the given module name.
+
+        This method is called by Python's import system. It checks if the
+        requested module is an implicit package (directory with .py files
+        but no __init__.py) and returns an appropriate spec.
+        """
+        parts = fullname.split('.')
+
+        for base_path in self.base_paths:
+            # Build the candidate path for this module
+            candidate = os.path.join(base_path, *parts)
+
+            # Check if it's a directory (potential implicit package)
+            if os.path.isdir(candidate):
+                # Skip if it has __init__.py (regular package, let normal finder handle it)
+                init_py = os.path.join(candidate, '__init__.py')
+                if os.path.isfile(init_py):
+                    continue
+
+                # Check if directory contains .py files or subdirectories
+                # (making it a valid implicit package)
+                try:
+                    contents = os.listdir(candidate)
+                    has_py_files = any(f.endswith('.py') for f in contents)
+                    has_subdirs = any(
+                        os.path.isdir(os.path.join(candidate, d))
+                        for d in contents
+                        if not d.startswith('.')
+                    )
+
+                    if has_py_files or has_subdirs:
+                        # Create a namespace package spec (no loader needed)
+                        spec = importlib.machinery.ModuleSpec(
+                            fullname,
+                            None,  # No loader - namespace package
+                            origin=candidate,
+                            is_package=True
+                        )
+                        # Set submodule search locations for package imports
+                        spec.submodule_search_locations = [candidate]
+                        return spec
+                except (PermissionError, OSError):
+                    # Skip directories we can't access
+                    pass
+
+        return None
+
+
+# Global reference to the installed finder (for cleanup/testing)
+_installed_finder: Optional[DatabricksBackwardsCompatibleFinder] = None
 
 
 def find_package_roots(start_dir: str, workspace_root: Optional[str] = None) -> Set[str]:
@@ -132,16 +216,42 @@ def discover_import_paths(
     return sorted(paths)
 
 
+def install_databricks_finder(base_paths: List[str]) -> None:
+    """
+    Install the Databricks-compatible import finder.
+
+    This enables importing from folders without __init__.py,
+    matching Databricks' behavior.
+
+    Args:
+        base_paths: List of paths to search for implicit packages
+    """
+    global _installed_finder
+
+    # Remove any previously installed finder
+    if _installed_finder is not None:
+        try:
+            sys.meta_path.remove(_installed_finder)
+        except ValueError:
+            pass  # Already removed
+
+    # Install the new finder at the beginning of meta_path
+    # so it's checked before the default finders
+    _installed_finder = DatabricksBackwardsCompatibleFinder(base_paths)
+    sys.meta_path.insert(0, _installed_finder)
+
+
 def setup_import_paths(
     notebook_path: str,
     workspace_root: Optional[str] = None
 ) -> List[str]:
     """
-    Discover and add import paths to sys.path.
+    Discover and add import paths to sys.path, and install Databricks-compatible finder.
 
     This function is the main entry point called from kernel_runner.py.
-    It discovers all relevant paths for local module imports and adds
-    them to sys.path if not already present.
+    It discovers all relevant paths for local module imports, adds them
+    to sys.path if not already present, and installs a custom import finder
+    that allows importing from folders without __init__.py (Databricks style).
 
     Args:
         notebook_path: Full path to the notebook file
@@ -168,6 +278,11 @@ def setup_import_paths(
             # Insert at beginning so local modules take precedence
             sys.path.insert(0, normalized_path)
             added.append(normalized_path)
+
+    # Install the Databricks-compatible finder for implicit packages
+    # This allows 'from utils.module import ...' even without utils/__init__.py
+    if added:
+        install_databricks_finder(added)
 
     return added
 

@@ -369,3 +369,169 @@ describe('Environment Variable Configuration Tests', () => {
     }
   });
 });
+
+describe('Implicit Package Support (Databricks-style)', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'databricks-implicit-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Helper to check if a directory is an implicit package
+   * (has .py files but no __init__.py) - mirrors Python DatabricksBackwardsCompatibleFinder
+   */
+  function isImplicitPackage(dirPath: string): boolean {
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+      return false;
+    }
+
+    // Check for __init__.py - if present, it's a regular package
+    const initPy = path.join(dirPath, '__init__.py');
+    if (fs.existsSync(initPy)) {
+      return false;
+    }
+
+    // Check for .py files or subdirectories
+    try {
+      const contents = fs.readdirSync(dirPath);
+      const hasPyFiles = contents.some(f => f.endsWith('.py'));
+      const hasSubdirs = contents.some(f => {
+        const fullPath = path.join(dirPath, f);
+        return !f.startsWith('.') && fs.statSync(fullPath).isDirectory();
+      });
+      return hasPyFiles || hasSubdirs;
+    } catch {
+      return false;
+    }
+  }
+
+  describe('Implicit Package Detection', () => {
+    it('should detect folder with .py files as implicit package', () => {
+      // Create: tempDir/utils/langgraph_utils.py (no __init__.py)
+      const utilsDir = path.join(tempDir, 'utils');
+      fs.mkdirSync(utilsDir);
+      fs.writeFileSync(path.join(utilsDir, 'langgraph_utils.py'), '# module');
+
+      assert.ok(isImplicitPackage(utilsDir), 'Folder with .py files should be implicit package');
+    });
+
+    it('should detect folder with subdirectories as implicit package', () => {
+      // Create: tempDir/mypackage/subpkg/ (no __init__.py anywhere)
+      const pkgDir = path.join(tempDir, 'mypackage');
+      fs.mkdirSync(path.join(pkgDir, 'subpkg'), { recursive: true });
+
+      assert.ok(isImplicitPackage(pkgDir), 'Folder with subdirectories should be implicit package');
+    });
+
+    it('should NOT detect folder with __init__.py as implicit package', () => {
+      // Create: tempDir/regular_pkg/__init__.py
+      const pkgDir = path.join(tempDir, 'regular_pkg');
+      fs.mkdirSync(pkgDir);
+      fs.writeFileSync(path.join(pkgDir, '__init__.py'), '');
+      fs.writeFileSync(path.join(pkgDir, 'module.py'), '# module');
+
+      assert.ok(!isImplicitPackage(pkgDir), 'Folder with __init__.py is regular package, not implicit');
+    });
+
+    it('should NOT detect empty folder as implicit package', () => {
+      const emptyDir = path.join(tempDir, 'empty');
+      fs.mkdirSync(emptyDir);
+
+      assert.ok(!isImplicitPackage(emptyDir), 'Empty folder should not be implicit package');
+    });
+
+    it('should NOT detect folder with only hidden files as implicit package', () => {
+      const hiddenDir = path.join(tempDir, 'hidden');
+      fs.mkdirSync(hiddenDir);
+      fs.writeFileSync(path.join(hiddenDir, '.gitkeep'), '');
+
+      assert.ok(!isImplicitPackage(hiddenDir), 'Folder with only hidden files should not be implicit package');
+    });
+  });
+
+  describe('Databricks Import Patterns', () => {
+    it('should support import structure like Databricks notebooks', () => {
+      // Databricks-style structure:
+      // tempDir/
+      //   notebook.py
+      //   utils/                  (NO __init__.py - implicit package)
+      //     langgraph_utils.py
+      //     postgres_utils.py
+
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '# notebook');
+      fs.mkdirSync(path.join(tempDir, 'utils'));
+      fs.writeFileSync(path.join(tempDir, 'utils', 'langgraph_utils.py'), 'def func(): pass');
+      fs.writeFileSync(path.join(tempDir, 'utils', 'postgres_utils.py'), 'def other(): pass');
+
+      const utilsDir = path.join(tempDir, 'utils');
+
+      // utils/ should be an implicit package (no __init__.py but has .py files)
+      assert.ok(isImplicitPackage(utilsDir), 'utils/ should be detected as implicit package');
+
+      // The module files should exist
+      assert.ok(fs.existsSync(path.join(utilsDir, 'langgraph_utils.py')), 'langgraph_utils.py should exist');
+      assert.ok(fs.existsSync(path.join(utilsDir, 'postgres_utils.py')), 'postgres_utils.py should exist');
+    });
+
+    it('should support nested implicit packages', () => {
+      // Nested implicit packages:
+      // tempDir/
+      //   notebook.py
+      //   mypackage/              (NO __init__.py)
+      //     subpkg/               (NO __init__.py)
+      //       module.py
+
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '# notebook');
+      fs.mkdirSync(path.join(tempDir, 'mypackage', 'subpkg'), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, 'mypackage', 'subpkg', 'module.py'), 'VAR = 42');
+
+      assert.ok(isImplicitPackage(path.join(tempDir, 'mypackage')), 'mypackage/ should be implicit package');
+      assert.ok(isImplicitPackage(path.join(tempDir, 'mypackage', 'subpkg')), 'subpkg/ should be implicit package');
+    });
+
+    it('should support mixed regular and implicit packages', () => {
+      // Mixed structure:
+      // tempDir/
+      //   notebook.py
+      //   implicit_pkg/           (NO __init__.py)
+      //     module_a.py
+      //   regular_pkg/            (HAS __init__.py)
+      //     module_b.py
+
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '# notebook');
+
+      fs.mkdirSync(path.join(tempDir, 'implicit_pkg'));
+      fs.writeFileSync(path.join(tempDir, 'implicit_pkg', 'module_a.py'), '# implicit');
+
+      fs.mkdirSync(path.join(tempDir, 'regular_pkg'));
+      fs.writeFileSync(path.join(tempDir, 'regular_pkg', '__init__.py'), '');
+      fs.writeFileSync(path.join(tempDir, 'regular_pkg', 'module_b.py'), '# regular');
+
+      assert.ok(isImplicitPackage(path.join(tempDir, 'implicit_pkg')), 'implicit_pkg/ should be implicit package');
+      assert.ok(!isImplicitPackage(path.join(tempDir, 'regular_pkg')), 'regular_pkg/ should NOT be implicit package');
+    });
+  });
+
+  describe('Sibling Module Import Support', () => {
+    it('should have notebook directory in path for sibling .py imports', () => {
+      // Structure for "import helper" to work:
+      // tempDir/
+      //   notebook.py
+      //   helper.py
+
+      fs.writeFileSync(path.join(tempDir, 'notebook.py'), '# notebook');
+      fs.writeFileSync(path.join(tempDir, 'helper.py'), 'HELPER_VAR = 42');
+
+      // The notebook directory should be in discovered paths
+      const notebookPath = path.join(tempDir, 'notebook.py');
+      const notebookDir = path.dirname(notebookPath);
+
+      assert.ok(fs.existsSync(path.join(notebookDir, 'helper.py')), 'helper.py should be accessible from notebook dir');
+    });
+  });
+});

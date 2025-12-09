@@ -680,3 +680,98 @@ export class PythonExtensionApi {
     this._onDidChangeEnvironments.dispose();
   }
 }
+
+/**
+ * Result of checking if a package is installed
+ */
+export interface PackageCheckResult {
+  /** Whether the package is installed */
+  installed: boolean;
+  /** Package version if installed */
+  version?: string;
+  /** Error message if check failed */
+  error?: string;
+}
+
+/**
+ * Check if a Python package is installed in the given Python environment.
+ *
+ * @param pythonPath - Path to the Python executable
+ * @param packageName - Name of the package to check (e.g., "databricks-sdk")
+ * @param timeoutMs - Timeout in milliseconds (default: 10000)
+ * @returns PackageCheckResult with installed status and optional version
+ */
+export async function checkPythonPackageInstalled(
+  pythonPath: string,
+  packageName: string,
+  timeoutMs: number = 10000
+): Promise<PackageCheckResult> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve({ installed: false, error: 'Timeout checking package' });
+    }, timeoutMs);
+
+    try {
+      // Use importlib.metadata to check if package is installed and get version
+      const checkScript = `
+import sys
+try:
+    import importlib.metadata
+    version = importlib.metadata.version('${packageName}')
+    print(f"INSTALLED:{version}")
+except importlib.metadata.PackageNotFoundError:
+    print("NOT_INSTALLED")
+except Exception as e:
+    print(f"ERROR:{e}")
+`.trim();
+
+      const proc = cp.spawn(pythonPath, ['-c', checkScript], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout?.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      proc.on('close', (_code) => {
+        clearTimeout(timeout);
+
+        const output = stdout.trim();
+
+        if (output.startsWith('INSTALLED:')) {
+          const version = output.substring('INSTALLED:'.length);
+          resolve({ installed: true, version });
+        } else if (output === 'NOT_INSTALLED') {
+          resolve({ installed: false });
+        } else if (output.startsWith('ERROR:')) {
+          resolve({ installed: false, error: output.substring('ERROR:'.length) });
+        } else {
+          // Unexpected output or non-zero exit code
+          resolve({
+            installed: false,
+            error: stderr || `Unexpected output: ${output}`,
+          });
+        }
+      });
+
+      proc.on('error', (error) => {
+        clearTimeout(timeout);
+        resolve({ installed: false, error: error.message });
+      });
+    } catch (error) {
+      clearTimeout(timeout);
+      resolve({
+        installed: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+}

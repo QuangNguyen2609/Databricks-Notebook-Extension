@@ -6,7 +6,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PythonEnvironment } from '../utils/pythonExtensionApi';
+import { PythonEnvironment, checkPythonPackageInstalled } from '../utils/pythonExtensionApi';
 import { PersistentExecutor } from './persistentExecutor';
 import { OutputHandler } from '../utils/outputHandler';
 import {
@@ -15,6 +15,7 @@ import {
   stripMagicPrefix as stripMagicPrefixUtil,
 } from '../utils/codeTransform';
 import { extractErrorMessage } from '../utils/errorHandler';
+import { showErrorNotification, showInfoMessage } from '../utils/notifications';
 
 /**
  * NotebookController for a specific Python interpreter
@@ -403,8 +404,19 @@ export class PythonKernelController implements vscode.Disposable {
    * Ensure executor is initialized and started (used for intellisense before first cell execution)
    * This method creates the executor if needed and starts the Python process so that
    * IntelliSense queries can be executed immediately after kernel selection.
+   *
+   * Pre-flight checks:
+   * - Verifies databricks-sdk is installed (required for dbutils and Databricks Connect)
+   * - Shows actionable error message with install option if missing
    */
   async ensureExecutor(notebook: vscode.NotebookDocument): Promise<void> {
+    // Pre-flight check: Verify databricks-sdk is installed
+    const sdkCheck = await this.checkDatabricksSdkInstalled();
+    if (!sdkCheck.canStart) {
+      // Don't create executor if SDK is missing - user needs to install it first
+      return;
+    }
+
     if (!this._executor) {
       const profileName = this._profileProvider?.();
       console.debug(`[Kernel] Creating executor for intellisense: ${this._environment.path}, profile: ${profileName || 'none'}`);
@@ -427,6 +439,161 @@ export class PythonKernelController implements vscode.Disposable {
         console.warn(`[Kernel] Failed to start executor for intellisense`);
       }
     }
+  }
+
+  /**
+   * Check if required Databricks packages are installed in this Python environment.
+   * Validates:
+   * - databricks-sdk is installed (required for dbutils)
+   * - databricks-connect is installed and version <= 17.2 (required for serverless)
+   *
+   * Shows actionable error notifications if packages are missing or incompatible.
+   *
+   * @returns Object with canStart flag
+   */
+  private async checkDatabricksSdkInstalled(): Promise<{ canStart: boolean }> {
+    console.debug(`[Kernel] Checking Databricks packages in: ${this._environment.path}`);
+
+    // Check both packages in parallel for speed
+    const [sdkResult, connectResult] = await Promise.all([
+      checkPythonPackageInstalled(this._environment.path, 'databricks-sdk'),
+      checkPythonPackageInstalled(this._environment.path, 'databricks-connect'),
+    ]);
+
+    const envName = this._environment.displayName || this._environment.path;
+
+    // Check databricks-sdk
+    if (!sdkResult.installed) {
+      console.warn(`[Kernel] databricks-sdk not installed in: ${envName}`);
+      await this.showMissingPackageError('databricks-sdk', envName);
+      return { canStart: false };
+    }
+    console.debug(`[Kernel] databricks-sdk v${sdkResult.version} is installed`);
+
+    // Check databricks-connect
+    if (!connectResult.installed) {
+      console.warn(`[Kernel] databricks-connect not installed in: ${envName}`);
+      await this.showMissingPackageError('databricks-connect', envName, '<=17.2');
+      return { canStart: false };
+    }
+    console.debug(`[Kernel] databricks-connect v${connectResult.version} is installed`);
+
+    // Check databricks-connect version compatibility (must be <= 17.2 for serverless)
+    if (connectResult.version) {
+      const versionCheck = this.checkDatabricksConnectVersion(connectResult.version);
+      if (!versionCheck.compatible) {
+        console.warn(`[Kernel] databricks-connect v${connectResult.version} is not compatible with serverless`);
+        await this.showIncompatibleVersionError(connectResult.version, envName);
+        return { canStart: false };
+      }
+    }
+
+    return { canStart: true };
+  }
+
+  /**
+   * Check if databricks-connect version is compatible with serverless.
+   * Version must be <= 17.2 for serverless compute support.
+   *
+   * @param version - Version string (e.g., "17.2.0", "17.3.1")
+   * @returns Object with compatible flag
+   */
+  private checkDatabricksConnectVersion(version: string): { compatible: boolean } {
+    try {
+      const parts = version.split('.');
+      const major = parseInt(parts[0], 10);
+      const minor = parseInt(parts[1] || '0', 10);
+
+      // Version 17.3+ does not support serverless
+      if (major > 17 || (major === 17 && minor >= 3)) {
+        return { compatible: false };
+      }
+
+      return { compatible: true };
+    } catch {
+      // Can't parse version, assume compatible
+      return { compatible: true };
+    }
+  }
+
+  /**
+   * Show error notification for missing package with install options.
+   */
+  private async showMissingPackageError(
+    packageName: string,
+    envName: string,
+    versionConstraint?: string
+  ): Promise<void> {
+    const installSpec = versionConstraint
+      ? `${packageName}${versionConstraint}`
+      : packageName;
+
+    const message = `${packageName} is not installed in "${envName}". This package is required for Databricks notebooks.`;
+
+    const selection = await showErrorNotification(
+      message,
+      `Install ${packageName}`,
+      'Open Terminal'
+    );
+
+    if (selection === `Install ${packageName}`) {
+      await this.installPackage(installSpec, envName);
+    } else if (selection === 'Open Terminal') {
+      const terminal = vscode.window.createTerminal({
+        name: `Install ${packageName}`,
+        message: `Run: ${this._environment.path} -m pip install "${installSpec}"`,
+      });
+      terminal.show();
+      terminal.sendText(`"${this._environment.path}" -m pip install "${installSpec}"`);
+    }
+  }
+
+  /**
+   * Show error notification for incompatible databricks-connect version.
+   */
+  private async showIncompatibleVersionError(
+    currentVersion: string,
+    envName: string
+  ): Promise<void> {
+    const message = `databricks-connect v${currentVersion} in "${envName}" does not support serverless compute. Please use version 17.2 or earlier.`;
+
+    const selection = await showErrorNotification(
+      message,
+      'Install compatible version',
+      'Open Terminal'
+    );
+
+    const installSpec = 'databricks-connect<=17.2';
+
+    if (selection === 'Install compatible version') {
+      await this.installPackage(installSpec, envName);
+    } else if (selection === 'Open Terminal') {
+      const terminal = vscode.window.createTerminal({
+        name: 'Install databricks-connect',
+        message: `Run: ${this._environment.path} -m pip install "${installSpec}"`,
+      });
+      terminal.show();
+      terminal.sendText(`"${this._environment.path}" -m pip install "${installSpec}"`);
+    }
+  }
+
+  /**
+   * Install a Python package using pip in a VS Code terminal.
+   */
+  private async installPackage(installSpec: string, envName: string): Promise<void> {
+    showInfoMessage(`Installing ${installSpec} in ${envName}...`);
+
+    const terminal = vscode.window.createTerminal({
+      name: `Install (${envName})`,
+    });
+    terminal.show();
+    terminal.sendText(`"${this._environment.path}" -m pip install "${installSpec}"`);
+
+    // Show follow-up message
+    showInfoMessage(
+      'After installation completes, select the kernel again to start.',
+      10000
+    );
   }
 
   /**
