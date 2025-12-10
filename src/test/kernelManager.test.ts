@@ -200,6 +200,7 @@ const modulesToClear = [
   '../kernels/kernelManager',
   '../kernels/pythonKernelController',
   '../utils/pythonExtensionApi',
+  '../utils/notifications',
 ];
 modulesToClear.forEach(mod => {
   try {
@@ -239,6 +240,16 @@ Module.prototype.require = function(id: string) {
           return controller;
         }
       },
+    };
+  }
+  if (id === '../utils/notifications') {
+    return {
+      showWarningMessage: () => {},
+      showInfoMessage: () => {},
+      showErrorMessage: () => {},
+      showErrorNotification: () => Promise.resolve(undefined),
+      showWarningNotification: () => Promise.resolve(undefined),
+      showInfoNotification: () => Promise.resolve(undefined),
     };
   }
   return originalRequire.apply(this, [id]);

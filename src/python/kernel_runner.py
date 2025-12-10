@@ -15,6 +15,8 @@ import io
 import traceback
 import signal
 import os
+import ast
+import asyncio
 
 # Display utilities
 from display_utils import display_to_html
@@ -28,11 +30,71 @@ from databricks_utils import (
     get_auth_type_from_profile,
 )
 
+# Local widgets implementation for interactive input
+from local_widgets import LocalWidgets
+
 # Persistent namespace for variable storage across cells
 _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
 
 # Storage for display() outputs
 _display_outputs = []
+
+# Global local widgets instance (initialized in main())
+_local_widgets = None
+
+
+class LocalDbutils:
+    """
+    Local dbutils implementation that wraps SDK dbutils but overrides widgets.
+
+    The SDK's dbutils.widgets doesn't work locally (designed for Databricks runtime).
+    This wrapper uses LocalWidgets for interactive widget support while delegating
+    other utilities (fs, secrets, notebook) to the SDK implementation.
+    """
+
+    def __init__(self, sdk_dbutils=None, local_widgets=None):
+        """
+        Initialize LocalDbutils.
+
+        Args:
+            sdk_dbutils: SDK dbutils instance (for fs, secrets, notebook)
+            local_widgets: LocalWidgets instance for interactive widgets
+        """
+        self._sdk_dbutils = sdk_dbutils
+        self._widgets = local_widgets
+
+    @property
+    def widgets(self):
+        """Return local widgets implementation for interactive input."""
+        return self._widgets
+
+    @property
+    def fs(self):
+        """Delegate to SDK dbutils.fs if available."""
+        if self._sdk_dbutils:
+            return self._sdk_dbutils.fs
+        raise AttributeError("dbutils.fs requires Databricks SDK. Install with: pip install databricks-sdk")
+
+    @property
+    def secrets(self):
+        """Delegate to SDK dbutils.secrets if available."""
+        if self._sdk_dbutils:
+            return self._sdk_dbutils.secrets
+        raise AttributeError("dbutils.secrets requires Databricks SDK. Install with: pip install databricks-sdk")
+
+    @property
+    def notebook(self):
+        """Delegate to SDK dbutils.notebook if available."""
+        if self._sdk_dbutils:
+            return self._sdk_dbutils.notebook
+        raise AttributeError("dbutils.notebook requires Databricks SDK. Install with: pip install databricks-sdk")
+
+    @property
+    def jobs(self):
+        """Delegate to SDK dbutils.jobs if available."""
+        if self._sdk_dbutils:
+            return self._sdk_dbutils.jobs
+        raise AttributeError("dbutils.jobs requires Databricks SDK. Install with: pip install databricks-sdk")
 
 
 def get_venv_info():
@@ -97,6 +159,70 @@ def display(*args):
     display_to_html(*args, display_outputs=_display_outputs)
 
 
+def initialize_dbutils(profile=None, host=None, token=None):
+    """
+    Initialize dbutils using WorkspaceClient with local widgets override.
+
+    Creates a LocalDbutils instance that:
+    - Uses LocalWidgets for interactive widget support (always available)
+    - Delegates fs, secrets, notebook to SDK dbutils (when available)
+
+    Returns (dbutils, status_message) tuple.
+    """
+    global _local_widgets
+
+    sdk_dbutils = None
+    sdk_status = None
+
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        # Try profile-based auth first
+        if profile:
+            try:
+                w = WorkspaceClient(profile=profile)
+                sdk_dbutils = w.dbutils
+                sdk_status = "SDK: OK (profile)"
+                log_debug("SDK dbutils initialized via profile")
+            except Exception as e:
+                log_debug(f"SDK dbutils profile init failed: {e}")
+
+        # Try token-based auth if profile didn't work
+        if sdk_dbutils is None and host and token:
+            try:
+                w = WorkspaceClient(host=host, token=token)
+                sdk_dbutils = w.dbutils
+                sdk_status = "SDK: OK (token)"
+                log_debug("SDK dbutils initialized via token")
+            except Exception as e:
+                log_debug(f"SDK dbutils token init failed: {e}")
+
+        # Try default config (env vars) if nothing else worked
+        if sdk_dbutils is None:
+            try:
+                w = WorkspaceClient()
+                sdk_dbutils = w.dbutils
+                sdk_status = "SDK: OK (default)"
+                log_debug("SDK dbutils initialized via default config")
+            except Exception as e:
+                log_debug(f"SDK dbutils default init failed: {e}")
+                sdk_status = f"SDK: not available"
+
+    except ImportError:
+        log_debug("databricks-sdk not installed")
+        sdk_status = "SDK: not installed"
+
+    # Create LocalDbutils with local widgets (always available) and SDK (optional)
+    local_dbutils = LocalDbutils(sdk_dbutils, _local_widgets)
+    _namespace['dbutils'] = local_dbutils
+
+    # Build status message
+    widgets_status = "widgets: OK (interactive)"
+    status_message = f"dbutils: {sdk_status} | {widgets_status}"
+
+    return (local_dbutils, status_message)
+
+
 def initialize_spark_session():
     """
     Initialize Databricks Connect SparkSession with serverless compute.
@@ -130,7 +256,9 @@ def initialize_spark_session():
                 _namespace['spark'] = spark
                 _namespace['DatabricksSession'] = DatabricksSession
                 log_debug("Profile auth succeeded!")
-                return f"OK: Databricks Connect initialized (profile: {profile})"
+                # Initialize dbutils after spark
+                _, dbutils_status = initialize_dbutils(profile=profile, host=host)
+                return f"OK: Databricks Connect initialized (profile: {profile}). {dbutils_status}"
             except Exception as e:
                 log_debug(f"Profile auth failed: {e}")
                 errors.append(f"Profile failed: {e}")
@@ -155,7 +283,9 @@ def initialize_spark_session():
                     spark = DatabricksSession.builder.host(host).token(token).serverless(True).getOrCreate()
                     _namespace['spark'] = spark
                     _namespace['DatabricksSession'] = DatabricksSession
-                    return "OK: Databricks Connect initialized (token cache)"
+                    # Initialize dbutils after spark
+                    _, dbutils_status = initialize_dbutils(host=host, token=token)
+                    return f"OK: Databricks Connect initialized (token cache). {dbutils_status}"
                 except Exception as e:
                     errors.append(f"Token cache failed: {e}")
             else:
@@ -175,9 +305,79 @@ def handle_interrupt(signum, frame):
     raise KeyboardInterrupt()
 
 
+def _contains_top_level_await(code: str) -> bool:
+    """
+    Check if code contains top-level await expressions.
+
+    Uses AST parsing to detect await outside of async functions.
+    Returns False if the code has syntax errors (let compile() handle that).
+    """
+    try:
+        tree = ast.parse(code, mode='exec')
+    except SyntaxError:
+        # If it fails to parse, it might be because of top-level await
+        # Try parsing as async to check
+        try:
+            # Wrap in async function and try parsing
+            wrapped = f"async def __check__():\n" + "\n".join(
+                "    " + line for line in code.split("\n")
+            )
+            ast.parse(wrapped, mode='exec')
+            # If wrapped version parses, original likely has top-level await
+            return True
+        except SyntaxError:
+            # Both fail - let the regular error handling deal with it
+            return False
+
+    # Check only top-level statements, not inside functions/classes
+    def has_await(node):
+        """Recursively check for await, but don't descend into function/class defs."""
+        if isinstance(node, (ast.Await, ast.AsyncFor, ast.AsyncWith)):
+            return True
+        # Check for async comprehensions (is_async flag on comprehension nodes)
+        if isinstance(node, ast.comprehension) and node.is_async:
+            return True
+        # Don't check inside function or class definitions
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return False
+        # Check children
+        for child in ast.iter_child_nodes(node):
+            if has_await(child):
+                return True
+        return False
+
+    for stmt in tree.body:
+        if has_await(stmt):
+            return True
+    return False
+
+
+def _run_async_code(code: str, namespace: dict) -> None:
+    """
+    Execute code that contains top-level await.
+
+    Compiles the code in 'exec' mode with PyCF_ALLOW_TOP_LEVEL_AWAIT flag
+    and runs the resulting coroutine with asyncio.run().
+    """
+    # Python 3.8+ supports top-level await with this compile flag
+    compiled = compile(
+        code,
+        '<cell>',
+        'exec',
+        flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
+    )
+    # Use eval() instead of exec() - it returns the coroutine object
+    # when code has top-level await
+    coro = eval(compiled, namespace)
+    if asyncio.iscoroutine(coro):
+        asyncio.run(coro)
+
+
 def execute_code(code: str) -> dict:
     """
     Execute Python code in the persistent namespace.
+
+    Supports both synchronous code and code with top-level await.
 
     Args:
         code: Python code string to execute
@@ -201,11 +401,15 @@ def execute_code(code: str) -> dict:
         sys.stdout = stdout_capture
         sys.stderr = stderr_capture
 
-        # Compile the code to check for syntax errors
-        compiled = compile(code, '<cell>', 'exec')
-
-        # Execute in persistent namespace
-        exec(compiled, _namespace)
+        # Check if code contains top-level await
+        if _contains_top_level_await(code):
+            # Execute as async code
+            _run_async_code(code, _namespace)
+        else:
+            # Compile the code to check for syntax errors
+            compiled = compile(code, '<cell>', 'exec')
+            # Execute in persistent namespace
+            exec(compiled, _namespace)
 
         execution_time = time.time() - start_time
 
@@ -252,9 +456,13 @@ def execute_code(code: str) -> dict:
 
 def reset_namespace():
     """Reset the namespace to initial state and re-initialize spark."""
-    global _namespace, _display_outputs
+    global _namespace, _display_outputs, _local_widgets
     _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
     _display_outputs = []
+
+    # Clear widget values on reset (next get() will prompt again)
+    if _local_widgets:
+        _local_widgets.removeAll()
 
     # Add display() function to namespace
     _namespace['display'] = display
@@ -295,8 +503,48 @@ def main():
     # Get virtual environment info
     venv_info = get_venv_info()
 
+    # Setup import paths for local modules
+    added_import_paths = []
+    notebook_path = os.environ.get('DATABRICKS_NOTEBOOK_PATH', '')
+    workspace_root = os.environ.get('DATABRICKS_WORKSPACE_ROOT', '')
+
+    # Debug: Log the received paths
+    log_debug(f"DATABRICKS_NOTEBOOK_PATH: {notebook_path}")
+    log_debug(f"DATABRICKS_WORKSPACE_ROOT: {workspace_root}")
+
+    # Always add notebook directory to sys.path as a fallback
+    if notebook_path:
+        notebook_dir = os.path.dirname(os.path.abspath(notebook_path))
+        if notebook_dir and os.path.isdir(notebook_dir) and notebook_dir not in sys.path:
+            sys.path.insert(0, notebook_dir)
+            added_import_paths.append(notebook_dir)
+            log_debug(f"Added notebook directory to sys.path: {notebook_dir}")
+
+    # Try to use path_utils for more sophisticated package discovery
+    if notebook_path:
+        try:
+            from path_utils import setup_import_paths
+            extra_paths = setup_import_paths(notebook_path, workspace_root)
+            if extra_paths:
+                # Add any paths not already in our list
+                for p in extra_paths:
+                    if p not in added_import_paths:
+                        added_import_paths.append(p)
+                log_debug(f"Added import paths for local modules: {added_import_paths}")
+        except ImportError as e:
+            # Log to stderr so it's visible even without debug mode
+            print(f"[KERNEL] Warning: Could not import path_utils: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"[KERNEL] Warning: Error setting up import paths: {e}", file=sys.stderr)
+
     # Check databricks-connect compatibility
     db_compatible, db_version, db_warning = check_databricks_connect_compatibility()
+
+    # Initialize local widgets for interactive input
+    # This must be done before initialize_spark_session() which calls initialize_dbutils()
+    global _local_widgets
+    _local_widgets = LocalWidgets(stdin=sys.stdin, stdout=sys.stdout)
+    log_debug("LocalWidgets initialized for interactive input")
 
     # Add display() function to namespace
     _namespace['display'] = display
@@ -317,6 +565,7 @@ def main():
         'venv_info': venv_info,
         'databricks_connect_version': db_version,
         'databricks_connect_compatible': db_compatible,
+        'added_import_paths': added_import_paths,
     }
     print(json.dumps(ready_signal), flush=True)
 

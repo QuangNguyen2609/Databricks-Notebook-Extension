@@ -56,6 +56,16 @@ Module.prototype.require = function(id: string) {
   if (id === 'vscode') {
     return mockVscode;
   }
+  if (id === '../utils/notifications') {
+    return {
+      showErrorMessage: () => {},
+      showInfoMessage: () => {},
+      showWarningMessage: () => {},
+      showErrorNotification: () => Promise.resolve(undefined),
+      showWarningNotification: () => Promise.resolve(undefined),
+      showInfoNotification: () => Promise.resolve(undefined),
+    };
+  }
   return originalRequire.apply(this, [id]);
 };
 

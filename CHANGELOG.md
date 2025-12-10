@@ -5,6 +5,14 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2025-12-09
+### Added
+- **Local Python Module Imports**: Enable importing local `.py` modules from the notebook directory and workspace
+- **Pylance IntelliSense for Local Modules**: Automatic Pylance configuration for local imports
+- **Top-Level Await**: Execute async code with `await` directly in notebook cells without wrapping in async functions
+- **dbutils widget**: Local implementation for interactive input prompts
+- **dotenv auto-load***: Automatically load dotenv file in notebook directory or workspace root
+ 
 ## [0.3.7] - 2025-12-06
 
 ### Added
