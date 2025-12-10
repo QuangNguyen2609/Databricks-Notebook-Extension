@@ -33,11 +33,22 @@ describe('Local Import Path Discovery Tests', () => {
       return [];
     }
 
-    let current = path.resolve(startDir);
-    const normalizedWorkspaceRoot = workspaceRoot ? path.resolve(workspaceRoot) : undefined;
+    // When no workspace root is provided, skip traversal to avoid
+    // traversing the entire filesystem (can timeout on Windows)
+    if (!workspaceRoot) {
+      return [];
+    }
 
-    while (current && current !== path.dirname(current)) {
-      if (normalizedWorkspaceRoot && !current.startsWith(normalizedWorkspaceRoot)) {
+    let current = path.resolve(startDir);
+    const normalizedWorkspaceRoot = path.resolve(workspaceRoot);
+
+    // Safety: max iterations to prevent infinite loops
+    const maxIterations = 100;
+    let iterations = 0;
+
+    while (current && current !== path.dirname(current) && iterations < maxIterations) {
+      iterations++;
+      if (!current.startsWith(normalizedWorkspaceRoot)) {
         break;
       }
 
