@@ -168,6 +168,8 @@ const modulesToClear = [
   '../kernels/persistentExecutor',
   '../utils/outputHandler',
   '../utils/codeTransform',
+  '../utils/pythonExtensionApi',
+  '../utils/notifications',
 ];
 modulesToClear.forEach(mod => {
   try {
@@ -204,6 +206,19 @@ Module.prototype.require = function(id: string) {
       wrapSqlCode: (sql: string) => `spark.sql("""${sql}""")`,
       wrapShellCode: (shell: string) => `subprocess.run("""${shell}""")`,
       stripMagicPrefix: (code: string, _prefix: string) => code.replace(/^%\w+\s*/, ''),
+    };
+  }
+  if (id === '../utils/pythonExtensionApi') {
+    return {
+      PythonExtensionApi: class {},
+      // Mock checkPythonPackageInstalled to always return installed
+      checkPythonPackageInstalled: async () => ({ installed: true, version: '1.0.0' }),
+    };
+  }
+  if (id === '../utils/notifications') {
+    return {
+      showErrorNotification: () => Promise.resolve(undefined),
+      showInfoMessage: () => {},
     };
   }
   return originalRequire.apply(this, [id]);
