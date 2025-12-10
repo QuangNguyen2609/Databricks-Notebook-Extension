@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import * as readline from 'readline';
 import { showInfoMessage, showWarningMessage } from '../utils/notifications';
+import { loadEnvFilesFromPaths } from '../utils/dotenv';
 
 /**
  * Virtual environment info from Python kernel
@@ -48,6 +49,12 @@ export interface KernelStatusInfo {
 
 /**
  * Build environment variables for Python kernel process
+ *
+ * Loading order (later overrides earlier):
+ * 1. VS Code process environment (process.env)
+ * 2. .env files (workspace root, then notebook dir, then custom path)
+ * 3. Explicit Databricks variables (profile, debug, paths)
+ *
  * @param profileName - Optional Databricks profile name
  * @param debugMode - Whether debug mode is enabled
  * @param notebookPath - Optional path to the notebook file (for local imports)
@@ -60,8 +67,29 @@ export function buildKernelEnvironment(
   notebookPath?: string,
   workspaceRoot?: string
 ): NodeJS.ProcessEnv {
+  // Start with VS Code's environment
   const env: NodeJS.ProcessEnv = { ...process.env };
 
+  // Get custom .env path from VS Code settings
+  const customDotenvPath = vscode.workspace
+    .getConfiguration('databricks-notebook')
+    .get<string>('dotenvPath') || undefined;
+
+  // Load .env files (workspace root, then notebook dir, then custom path)
+  // Later files override earlier ones
+  console.log(`[dotenv] Loading .env files - notebookPath: ${notebookPath}, workspaceRoot: ${workspaceRoot}, customPath: ${customDotenvPath}`);
+  const dotenvVars = loadEnvFilesFromPaths(notebookPath, workspaceRoot, customDotenvPath);
+  const varCount = Object.keys(dotenvVars).length;
+  if (varCount > 0) {
+    console.log(`[dotenv] Loaded ${varCount} environment variables from .env files`);
+  } else {
+    console.log(`[dotenv] No .env files found or no variables loaded`);
+  }
+  for (const [key, value] of Object.entries(dotenvVars)) {
+    env[key] = value;
+  }
+
+  // Databricks-specific variables (highest priority - override .env)
   if (profileName) {
     env.DATABRICKS_CONFIG_PROFILE = profileName;
   }

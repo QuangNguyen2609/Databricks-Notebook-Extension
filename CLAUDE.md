@@ -102,6 +102,11 @@ The extension operates on a serialization/deserialization cycle:
   - Loads OAuth tokens from `~/.databricks/token-cache.json`
   - Enables serverless compute by default
 
+**`src/utils/dotenv.ts`** - Environment variable loader
+- Parses `.env` files in standard format (KEY=value, quoted values, comments)
+- Searches for `.env` files in workspace root, notebook directory, and custom path
+- Merges variables with proper precedence (custom > notebook dir > workspace)
+
 ### Unified Tab Experience Pattern
 
 The extension uses a "close-then-open" pattern to avoid duplicate tabs:
@@ -190,6 +195,7 @@ Databricks Connect is auto-initialized on kernel start if configured in `~/.data
 | `databricks-notebook.showNotification` | `true` | Show prompt for detected notebooks |
 | `databricks-notebook.pythonExecutionTimeout` | `60000` | Cell execution timeout (ms) |
 | `databricks-notebook.enableScrollableOutput` | `true` | Enable scrollable output |
+| `databricks-notebook.dotenvPath` | `""` | Custom path to .env file for kernel environment |
 
 ## Testing Strategy
 
