@@ -5,6 +5,20 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2025-12-13
+
+### Fixed
+- **Async Event Loop**: Fixed "Event loop is closed" error when running `await` statements in cells
+  - SDK clients (Databricks SDK, OpenAI, etc.) now work correctly on first execution
+  - Implemented persistent event loop that stays open across cell executions
+  - Previously `asyncio.run()` was creating and closing a new loop for each cell
+- **Kernel Startup Race Condition**: Added promise-based locking to prevent concurrent start() calls
+  - Fixes race conditions when restart() and execute() call start() simultaneously
+  - Prevents duplicate kernel initialization attempts
+- **Windows CRLF Parsing**: Normalized line endings to handle Windows CRLF files correctly
+  - Fixes bare `# MAGIC\r` lines being rendered as "MAGIC" headers in markdown cells
+  - All line endings now normalized to `\n` before parsing
+
 ## [0.3.8] - 2025-12-09
 ### Added
 - **Local Python Module Imports**: Enable importing local `.py` modules from the notebook directory and workspace
