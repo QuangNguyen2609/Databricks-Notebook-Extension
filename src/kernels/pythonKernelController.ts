@@ -6,7 +6,7 @@
  */
 
 import * as vscode from 'vscode';
-import { PythonEnvironment, checkPythonPackageInstalled, PythonExtensionApi } from '../utils/pythonExtensionApi';
+import { PythonEnvironment, checkPythonPackageInstalled } from '../utils/pythonExtensionApi';
 import { PersistentExecutor } from './persistentExecutor';
 import { OutputHandler } from '../utils/outputHandler';
 import {

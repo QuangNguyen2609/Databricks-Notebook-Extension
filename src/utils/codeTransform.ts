@@ -93,7 +93,7 @@ if _result.stderr:
  */
 export function wrapPipCode(pipCode: string): string {
   // Strip %pip prefix if present
-  let cleanCode = stripMagicPrefix(pipCode, '%pip');
+  const cleanCode = stripMagicPrefix(pipCode, '%pip');
 
   // Parse the pip arguments
   // Split by whitespace but preserve quoted strings
