@@ -30,6 +30,7 @@ import {
   convertToPythonCell,
   clearDisableSqlAutoDetectFlag,
 } from './utils/cellOperations';
+import { modifyCell } from './utils/cellEditor';
 import {
   findTextEditorTab,
   findNotebookTab,
@@ -533,6 +534,33 @@ async function handleMagicInPythonCell(
   magic: string,
   languageId: string
 ): Promise<void> {
+  // %pip cells should stay as Python cells (like Jupyter) - don't convert or remove
+  if (magic === '%pip') {
+    // Only update metadata if not already set to avoid repeated cell replacements
+    if (cell.metadata?.databricksType !== 'pip') {
+      const cellKey = cell.document.uri.toString();
+      // Skip if already processed
+      if (autoDetectedCells.has(cellKey)) {
+        return;
+      }
+
+      await modifyCell(notebook, cell, (c) => ({
+        content: c.document.getText(),
+        languageId: 'python',
+        metadata: {
+          ...c.metadata,
+          databricksType: 'pip',
+        },
+      }), {
+        enterEditMode: true,
+        moveCursorToEnd: true,
+        trackingKey: cellKey,
+        trackingSet: autoDetectedCells,
+      });
+    }
+    return;
+  }
+
   // If user manually added magic command (disableSqlAutoDetect flag is set),
   // convert to the appropriate language immediately
   if (cell.metadata?.disableSqlAutoDetect === true) {

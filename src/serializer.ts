@@ -90,10 +90,18 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
   /**
    * Infer cell type from VS Code language ID
    * @param languageId - The VS Code language identifier
-   * @param content - The cell content (used for SQL auto-detection)
+   * @param content - The cell content (used for SQL and pip auto-detection)
    * @returns The inferred cell type
    */
   private inferCellTypeFromLanguage(languageId: string, content: string): CellType {
+    const trimmedContent = content.trim();
+
+    // Auto-detect %pip from content - pip cells stay as Python cells (like Jupyter)
+    // but we identify them as 'pip' type for proper serialization
+    if (trimmedContent.startsWith('%pip')) {
+      return 'pip';
+    }
+
     // Map VS Code language IDs to Databricks cell types
     const languageToType: Record<string, CellType> = {
       'sql': 'sql',
@@ -110,7 +118,6 @@ export class DatabricksNotebookSerializer implements vscode.NotebookSerializer {
     }
 
     // Auto-detect SQL from content (SELECT, INSERT, UPDATE, DELETE, etc.)
-    const trimmedContent = content.trim();
     if (languageId === 'python' && SQL_KEYWORDS_REGEX.test(trimmedContent)) {
       return 'sql';
     }

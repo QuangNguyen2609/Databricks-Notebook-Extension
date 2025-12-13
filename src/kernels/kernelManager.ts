@@ -29,6 +29,13 @@ export class KernelManager implements vscode.Disposable {
   readonly onDidChangeControllers = this._onDidChangeControllers.event;
 
   /**
+   * Get the Python extension API instance
+   */
+  getPythonApi(): PythonExtensionApi {
+    return this._pythonApi;
+  }
+
+  /**
    * Create a new KernelManager
    *
    * @param extensionPath - Path to the extension directory
