@@ -120,6 +120,7 @@ export async function removeMagicCommand(
     };
   }, {
     enterEditMode: true,
+    moveCursorToEnd: true,
     trackingKey: cellKey,
     trackingSet,
   });
@@ -159,6 +160,7 @@ export async function convertCellToLanguage(
     };
   }, {
     enterEditMode: true,
+    moveCursorToEnd: true,
     trackingKey: cellKey,
     trackingSet,
   });
@@ -196,6 +198,7 @@ export async function convertToPythonCell(
     };
   }, {
     enterEditMode: true,
+    moveCursorToEnd: true,
     trackingKey: cellKey,
     trackingSet,
   });
@@ -226,5 +229,6 @@ export async function clearDisableSqlAutoDetectFlag(
     };
   }, {
     enterEditMode: true,
+    moveCursorToEnd: true,
   });
 }

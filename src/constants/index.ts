@@ -62,7 +62,7 @@ export const MAGIC_COMMANDS: Record<string, MagicCommandConfig> = {
   '%sh': { type: 'shell', language: 'shellscript' },
   '%fs': { type: 'fs', language: 'shellscript' },
   '%run': { type: 'run', language: 'python' },
-  '%pip': { type: 'pip', language: 'shellscript' },
+  '%pip': { type: 'pip', language: 'python' },  // Keep as Python cell like Jupyter
   '%r': { type: 'r', language: 'r' },
 };
 
@@ -85,6 +85,10 @@ export const LANGUAGE_TO_MAGIC: Record<string, string> = {
 /**
  * Mapping of magic commands to VS Code language IDs
  * For converting from magic command to language
+ *
+ * Note: %pip is intentionally not included here because pip cells
+ * should remain as Python cells (like in Jupyter), not be converted
+ * to shellscript cells. The %pip prefix stays visible in the cell.
  */
 export const MAGIC_TO_LANGUAGE: Record<string, string> = {
   '%sql': 'sql',

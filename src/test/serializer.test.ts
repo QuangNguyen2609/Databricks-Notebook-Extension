@@ -401,5 +401,61 @@ print("python cell")
       const notebook = await serializer.deserializeNotebook(bytes, token);
       assert.strictEqual(notebook.cells[0].metadata?.databricksType, 'markdown');
     });
+
+    it('should detect pip type from %pip content', async () => {
+      // When a cell has %pip in the content, it should be inferred as pip type
+      const cellData = new mockVscode.NotebookCellData(
+        mockVscode.NotebookCellKind.Code,
+        '%pip install pandas',
+        'python'
+      );
+
+      const notebookData = new mockVscode.NotebookData([cellData]);
+      const token = {} as never;
+
+      const bytes = await serializer.serializeNotebook(notebookData as never, token);
+      const content = new TextDecoder().decode(bytes);
+
+      // Should serialize as pip cell with MAGIC prefix
+      assert.ok(content.includes('# MAGIC %pip'));
+      assert.ok(content.includes('install pandas'));
+    });
+
+    it('should deserialize pip cells correctly', async () => {
+      const content = `# Databricks notebook source
+
+# MAGIC %pip install pandas numpy`;
+
+      const bytes = new TextEncoder().encode(content);
+      const token = {} as never;
+
+      const notebook = await serializer.deserializeNotebook(bytes, token);
+
+      assert.strictEqual(notebook.cells.length, 1);
+      assert.strictEqual(notebook.cells[0].metadata?.databricksType, 'pip');
+      // Pip cells stay as Python (like Jupyter), not shellscript
+      assert.strictEqual(notebook.cells[0].languageId, 'python');
+      assert.ok(notebook.cells[0].value.includes('%pip install pandas numpy'));
+    });
+
+    it('should round-trip pip cells', async () => {
+      const originalContent = `# Databricks notebook source
+
+# MAGIC %pip install pandas==1.5.0 numpy`;
+
+      // Deserialize
+      const bytes1 = new TextEncoder().encode(originalContent);
+      const token = {} as never;
+      const notebook = await serializer.deserializeNotebook(bytes1, token);
+
+      // Serialize back
+      const notebookData = new mockVscode.NotebookData(notebook.cells as never);
+      const bytes2 = await serializer.serializeNotebook(notebookData as never, token);
+      const roundtrippedContent = new TextDecoder().decode(bytes2);
+
+      // Should preserve pip command
+      assert.ok(roundtrippedContent.includes('# MAGIC %pip'));
+      assert.ok(roundtrippedContent.includes('install pandas==1.5.0 numpy'));
+    });
   });
 });

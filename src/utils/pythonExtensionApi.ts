@@ -113,6 +113,37 @@ export class PythonExtensionApi {
   }
 
   /**
+   * Set the active Python environment for a specific resource (notebook or file).
+   * This tells the Python extension (and Pylance) which interpreter to use for
+   * linting, IntelliSense, and other language features.
+   *
+   * @param pythonPath - Path to the Python executable
+   * @param resource - URI of the notebook or file
+   * @returns true if successful, false otherwise
+   */
+  async setActiveEnvironmentPath(pythonPath: string, resource?: vscode.Uri): Promise<boolean> {
+    if (!this.initialized) {
+      console.warn('[PythonExtensionApi] Cannot set environment - API not initialized');
+      return false;
+    }
+
+    try {
+      // Try new API (environments.updateActiveEnvironmentPath)
+      if (this.pythonApi?.environments?.updateActiveEnvironmentPath) {
+        console.debug(`[PythonExtensionApi] Setting environment for ${resource?.toString()}: ${pythonPath}`);
+        await this.pythonApi.environments.updateActiveEnvironmentPath(pythonPath, resource);
+        return true;
+      }
+
+      console.warn('[PythonExtensionApi] updateActiveEnvironmentPath API not available');
+      return false;
+    } catch (error) {
+      console.error('[PythonExtensionApi] Failed to set active environment path:', error);
+      return false;
+    }
+  }
+
+  /**
    * Trigger a refresh of Python environments
    * This is especially important on Windows where conda/venv may not be discovered immediately
    */

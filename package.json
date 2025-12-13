@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "databricks-notebook-studio",

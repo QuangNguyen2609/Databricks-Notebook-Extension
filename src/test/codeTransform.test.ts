@@ -8,6 +8,7 @@ import {
   stripMagicPrefix,
   wrapSqlCode,
   wrapShellCode,
+  wrapPipCode,
 } from '../utils/codeTransform';
 
 describe('Code Transform Tests', () => {
@@ -227,6 +228,122 @@ whoami`;
     it('should handle shell command with environment variables', () => {
       const result = wrapShellCode('echo $HOME');
       assert.ok(result.includes('$HOME'));
+    });
+  });
+
+  describe('wrapPipCode', () => {
+    it('should wrap simple pip install command', () => {
+      const result = wrapPipCode('install pandas');
+      assert.ok(result.includes('import subprocess'));
+      assert.ok(result.includes('import sys'));
+      assert.ok(result.includes('[_sys.executable, "-m", "pip"]'));
+      assert.ok(result.includes('"install"'));
+      assert.ok(result.includes('"pandas"'));
+    });
+
+    it('should strip %pip prefix before wrapping', () => {
+      const result = wrapPipCode('%pip install numpy');
+      assert.ok(result.includes('"install"'));
+      assert.ok(result.includes('"numpy"'));
+      assert.ok(!result.includes('%pip'));
+    });
+
+    it('should handle multiple packages', () => {
+      const result = wrapPipCode('install pandas numpy scipy');
+      assert.ok(result.includes('"pandas"'));
+      assert.ok(result.includes('"numpy"'));
+      assert.ok(result.includes('"scipy"'));
+    });
+
+    it('should handle pip install with version specifiers', () => {
+      const result = wrapPipCode('install pandas==1.5.0');
+      assert.ok(result.includes('"pandas==1.5.0"'));
+    });
+
+    it('should handle pip install with complex version specifiers', () => {
+      const result = wrapPipCode('install "pandas>=1.5.0,<2.0.0"');
+      assert.ok(result.includes('"pandas>=1.5.0,<2.0.0"'));
+    });
+
+    it('should handle pip uninstall command', () => {
+      const result = wrapPipCode('uninstall -y pandas');
+      assert.ok(result.includes('"uninstall"'));
+      assert.ok(result.includes('"-y"'));
+      assert.ok(result.includes('"pandas"'));
+    });
+
+    it('should handle pip list command', () => {
+      const result = wrapPipCode('list');
+      assert.ok(result.includes('"list"'));
+    });
+
+    it('should handle pip show command', () => {
+      const result = wrapPipCode('show pandas');
+      assert.ok(result.includes('"show"'));
+      assert.ok(result.includes('"pandas"'));
+    });
+
+    it('should handle pip install from git URL', () => {
+      const result = wrapPipCode('install git+https://github.com/user/repo.git');
+      assert.ok(result.includes('"git+https://github.com/user/repo.git"'));
+    });
+
+    it('should handle pip install with extras', () => {
+      const result = wrapPipCode('install pandas[excel]');
+      assert.ok(result.includes('"pandas[excel]"'));
+    });
+
+    it('should handle pip install with flags', () => {
+      const result = wrapPipCode('install --upgrade pandas');
+      assert.ok(result.includes('"install"'));
+      assert.ok(result.includes('"--upgrade"'));
+      assert.ok(result.includes('"pandas"'));
+    });
+
+    it('should capture stdout and stderr', () => {
+      const result = wrapPipCode('install pandas');
+      assert.ok(result.includes('capture_output=True'));
+      assert.ok(result.includes('_result.stdout'));
+      assert.ok(result.includes('_result.stderr'));
+    });
+
+    it('should check for non-zero return code', () => {
+      const result = wrapPipCode('install pandas');
+      assert.ok(result.includes('if _result.returncode != 0'));
+      assert.ok(result.includes('raise RuntimeError'));
+    });
+
+    it('should show the command being executed', () => {
+      const result = wrapPipCode('install pandas');
+      assert.ok(result.includes('print(f"[pip] Running: {'));
+    });
+
+    it('should handle quoted arguments with spaces', () => {
+      const result = wrapPipCode('install "my package"');
+      assert.ok(result.includes('"my package"'));
+    });
+
+    it('should handle single-quoted arguments', () => {
+      const result = wrapPipCode("install 'my-package'");
+      assert.ok(result.includes('"my-package"'));
+    });
+
+    it('should escape backslashes in package names', () => {
+      const result = wrapPipCode('install C:\\\\path\\\\to\\\\package.whl');
+      // Backslashes should be escaped
+      assert.ok(result.includes('\\\\'));
+    });
+
+    it('should handle pip install from requirements file', () => {
+      const result = wrapPipCode('install -r requirements.txt');
+      assert.ok(result.includes('"-r"'));
+      assert.ok(result.includes('"requirements.txt"'));
+    });
+
+    it('should handle pip install in editable mode', () => {
+      const result = wrapPipCode('install -e .');
+      assert.ok(result.includes('"-e"'));
+      assert.ok(result.includes('"."'));
     });
   });
 

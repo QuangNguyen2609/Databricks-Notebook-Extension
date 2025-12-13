@@ -12,6 +12,7 @@ import { OutputHandler } from '../utils/outputHandler';
 import {
   wrapSqlCode as wrapSqlCodeUtil,
   wrapShellCode as wrapShellCodeUtil,
+  wrapPipCode as wrapPipCodeUtil,
   stripMagicPrefix as stripMagicPrefixUtil,
 } from '../utils/codeTransform';
 import { extractErrorMessage } from '../utils/errorHandler';
@@ -179,6 +180,14 @@ export class PythonKernelController implements vscode.Disposable {
       // Check if this is a shell cell that should be auto-wrapped with subprocess
       const isShellCell = databricksType === 'shell' || languageId === 'shellscript';
 
+      // Check if this is a pip cell that should be auto-wrapped with subprocess
+      // Detect both from metadata and from content (in case user just typed %pip)
+      const isPipCell = databricksType === 'pip' || code.trim().startsWith('%pip');
+
+      if (isPipCell) {
+        console.debug(`[Kernel] Detected pip cell - will wrap for execution`);
+      }
+
       // Cells that cannot be executed locally (need Databricks runtime)
       const nonExecutableCells = ['scala', 'r', 'fs', 'run'];
       const isNonExecutable = nonExecutableCells.includes(databricksType || '') ||
@@ -214,9 +223,15 @@ export class PythonKernelController implements vscode.Disposable {
         // Wrap shell commands in subprocess
         executableCode = this.wrapShellCode(code);
         console.debug(`[Kernel] Wrapped shell code for execution`);
+      } else if (isPipCell) {
+        // Wrap pip commands to execute in current interpreter
+        executableCode = this.wrapPipCode(code);
+        console.debug(`[Kernel] Wrapped pip code for execution. Original: ${code.substring(0, 50)}`);
+        console.debug(`[Kernel] Executable code starts with: ${executableCode.substring(0, 100)}`);
       } else {
         // For Python cells, strip %python prefix if present
         executableCode = this.stripMagicPrefix(code, '%python');
+        console.debug(`[Kernel] Executing as regular Python cell`);
       }
 
       // Execute the code
@@ -263,6 +278,13 @@ export class PythonKernelController implements vscode.Disposable {
    */
   private wrapShellCode(shellCode: string): string {
     return wrapShellCodeUtil(shellCode);
+  }
+
+  /**
+   * Wrap pip code to execute in the current Python interpreter
+   */
+  private wrapPipCode(pipCode: string): string {
+    return wrapPipCodeUtil(pipCode);
   }
 
   /**

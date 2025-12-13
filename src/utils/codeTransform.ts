@@ -84,3 +84,42 @@ if _result.stdout:
 if _result.stderr:
     print(_result.stderr)`;
 }
+
+/**
+ * Wrap pip command for execution in the current Python interpreter
+ *
+ * @param pipCode - The pip command to wrap (e.g., "install pandas" or "%pip install pandas")
+ * @returns Python code that executes pip in the current interpreter's environment
+ */
+export function wrapPipCode(pipCode: string): string {
+  // Strip %pip prefix if present
+  const cleanCode = stripMagicPrefix(pipCode, '%pip');
+
+  // Parse the pip arguments
+  // Split by whitespace but preserve quoted strings
+  const args = cleanCode.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+
+  // Escape each argument for Python string representation
+  const escapedArgs = args.map(arg => {
+    // Remove surrounding quotes if present, then escape for Python
+    const cleanArg = arg.replace(/^["']|["']$/g, '');
+    // Escape backslashes and quotes
+    return cleanArg.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  });
+
+  // Build the command list as a Python list literal
+  const argsListStr = escapedArgs.map(arg => `"${arg}"`).join(', ');
+
+  return `import subprocess as _sp
+import sys as _sys
+_cmd = [_sys.executable, "-m", "pip"] + [${argsListStr}]
+print(f"[pip] Running: {' '.join(_cmd)}")
+_result = _sp.run(_cmd, capture_output=True, text=True)
+if _result.stdout:
+    print(_result.stdout)
+if _result.stderr:
+    print(_result.stderr, file=_sys.stderr)
+if _result.returncode != 0:
+    raise RuntimeError(f"pip command failed with exit code {_result.returncode}")
+print(f"[pip] Command completed successfully")`;
+}
