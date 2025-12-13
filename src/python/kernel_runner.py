@@ -42,6 +42,11 @@ _display_outputs = []
 # Global local widgets instance (initialized in main())
 _local_widgets = None
 
+# Persistent event loop for async code execution
+# This loop stays open throughout the kernel's lifetime to avoid
+# "Event loop is closed" errors with SDK clients that store loop references
+_event_loop = None
+
 
 class LocalDbutils:
     """
@@ -357,8 +362,19 @@ def _run_async_code(code: str, namespace: dict) -> None:
     Execute code that contains top-level await.
 
     Compiles the code in 'exec' mode with PyCF_ALLOW_TOP_LEVEL_AWAIT flag
-    and runs the resulting coroutine with asyncio.run().
+    and runs the resulting coroutine using a persistent event loop.
+
+    Uses a persistent event loop that stays open across cell executions to avoid
+    "Event loop is closed" errors with SDK clients (e.g., Databricks SDK, OpenAI SDK)
+    that store references to the event loop.
     """
+    global _event_loop
+
+    # Create or get the persistent event loop
+    if _event_loop is None or _event_loop.is_closed():
+        _event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_event_loop)
+
     # Python 3.8+ supports top-level await with this compile flag
     compiled = compile(
         code,
@@ -370,7 +386,9 @@ def _run_async_code(code: str, namespace: dict) -> None:
     # when code has top-level await
     coro = eval(compiled, namespace)
     if asyncio.iscoroutine(coro):
-        asyncio.run(coro)
+        # Use run_until_complete with persistent loop instead of asyncio.run()
+        # This keeps the loop open for subsequent async operations
+        _event_loop.run_until_complete(coro)
 
 
 def execute_code(code: str) -> dict:
@@ -456,13 +474,18 @@ def execute_code(code: str) -> dict:
 
 def reset_namespace():
     """Reset the namespace to initial state and re-initialize spark."""
-    global _namespace, _display_outputs, _local_widgets
+    global _namespace, _display_outputs, _local_widgets, _event_loop
     _namespace = {'__name__': '__main__', '__builtins__': __builtins__}
     _display_outputs = []
 
     # Clear widget values on reset (next get() will prompt again)
     if _local_widgets:
         _local_widgets.removeAll()
+
+    # Close and reset the event loop to ensure clean async state
+    if _event_loop is not None and not _event_loop.is_closed():
+        _event_loop.close()
+    _event_loop = None
 
     # Add display() function to namespace
     _namespace['display'] = display

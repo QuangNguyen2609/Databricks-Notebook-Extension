@@ -135,6 +135,9 @@ export class PersistentExecutor implements vscode.Disposable {
   private _requestCounter = 0;
   private _readlineInterface: readline.Interface | null = null;
 
+  /** Promise that resolves when the current start operation completes */
+  private _startPromise: Promise<boolean> | null = null;
+
   /** Spark status from kernel initialization (instance-specific) */
   private _sparkStatus: string | undefined;
 
@@ -172,13 +175,40 @@ export class PersistentExecutor implements vscode.Disposable {
   }
 
   /**
-   * Start the Python process
+   * Start the Python process.
+   *
+   * This method handles concurrent calls safely:
+   * - If already running and ready, returns true immediately
+   * - If a start is in progress, waits for it to complete
+   * - Otherwise, starts a new process
    */
   async start(): Promise<boolean> {
-    if (this._process) {
-      return true; // Already running
+    // If already running and ready, return immediately
+    if (this._process && this._isReady) {
+      return true;
     }
 
+    // If a start is already in progress, wait for it
+    // This prevents race conditions when restart() and execute() both call start()
+    if (this._startPromise) {
+      console.debug('[Python Kernel] Start already in progress, waiting...');
+      return this._startPromise;
+    }
+
+    // Start the kernel and track the promise
+    this._startPromise = this.doStart();
+
+    try {
+      return await this._startPromise;
+    } finally {
+      this._startPromise = null;
+    }
+  }
+
+  /**
+   * Internal method that actually starts the Python process
+   */
+  private doStart(): Promise<boolean> {
     this._onDidChangeState.fire('starting');
     this._debugMode = isDebugModeEnabled();
 
@@ -691,6 +721,7 @@ export class PersistentExecutor implements vscode.Disposable {
    */
   private cleanup(): void {
     this._isReady = false;
+    this._startPromise = null;
 
     // Reject all pending requests
     for (const [id, pending] of this._pendingRequests) {

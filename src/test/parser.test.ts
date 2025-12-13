@@ -685,6 +685,26 @@ print("hello")`;
       assert.ok(lines.some(line => line.includes('Title')));
       assert.ok(lines.some(line => line.includes('Content after blank')));
     });
+
+    it('should handle bare # MAGIC with Windows line endings (CRLF)', () => {
+      // Windows CRLF line endings - the bare # MAGIC becomes # MAGIC\r when split by \n
+      // This was causing # MAGIC to be rendered as "MAGIC" header in markdown
+      const content = '# Databricks notebook source\r\n\r\n# MAGIC %md\r\n# MAGIC # Title\r\n# MAGIC\r\n# MAGIC Content after blank';
+
+      const notebook = parseNotebook(content);
+      assert.ok(notebook);
+      assert.strictEqual(notebook?.cells.length, 1);
+      assert.strictEqual(notebook?.cells[0].type, 'markdown');
+
+      const lines = notebook?.cells[0].content.split('\n') || [];
+      // Should have an empty line between Title and Content (not "MAGIC" text)
+      assert.ok(lines.some(line => line === ''), 'Should have empty line for blank # MAGIC');
+      assert.ok(lines.some(line => line.includes('# Title')));
+      assert.ok(lines.some(line => line.includes('Content after blank')));
+      // Make sure # MAGIC didn't leak through as text
+      assert.ok(!lines.some(line => line.includes('MAGIC') && !line.includes('#')),
+        'Should not have bare "MAGIC" text in content');
+    });
   });
 
   describe('Serialization Edge Cases', () => {

@@ -51,7 +51,10 @@ export function parseNotebook(content: string): ParsedNotebook | null {
     return null;
   }
 
-  const lines = content.split('\n');
+  // Normalize line endings to handle Windows CRLF files
+  // This ensures bare "# MAGIC\r" lines are properly handled as blank markdown lines
+  const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalizedContent.split('\n');
   const cells: DatabricksCell[] = [];
 
   // Find all cell boundaries (delimiter positions)
