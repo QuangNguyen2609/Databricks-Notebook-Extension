@@ -2,6 +2,7 @@
 Display utilities for rendering DataFrames and data structures as HTML.
 Mimics Databricks display() functionality.
 """
+from datetime import datetime
 
 # SVG icons for data types (inline, 14x14 viewBox)
 # Covers all Databricks SQL types
@@ -178,11 +179,61 @@ def html_escape(text):
         .replace("'", '&#39;'))
 
 
+def normalize_timestamp_for_display(value):
+    """
+    Format datetime value for display without timezone conversion.
+
+    Preserves the original timezone offset to match Databricks display behavior.
+    For timezone-aware datetimes, formats with the original offset.
+    For naive datetimes (TIMESTAMP_NTZ), formats without timezone.
+
+    Args:
+        value: A datetime.datetime object
+
+    Returns:
+        String formatted as ISO 8601 with original timezone preserved,
+        or None if not a datetime object.
+    """
+    if not isinstance(value, datetime):
+        return None
+
+    # Use isoformat() which preserves the original timezone offset
+    # Unlike str() which may convert to local timezone representation
+    formatted = value.isoformat()
+
+    # Ensure millisecond precision to match Databricks display format
+    # Databricks shows: 2025-01-01T00:00:00.000+00:00
+    if '.' not in formatted.split('+')[0].split('-')[-1]:
+        # No fractional seconds present, add .000
+        if value.tzinfo is not None:
+            # Find timezone separator (+ or last - after time portion)
+            if '+' in formatted:
+                dt_part, tz_part = formatted.rsplit('+', 1)
+                formatted = f"{dt_part}.000+{tz_part}"
+            else:
+                # Handle negative timezone offset (e.g., -05:00)
+                # Find the last '-' that's part of timezone (after T and HH:MM:SS)
+                t_idx = formatted.find('T')
+                if t_idx != -1:
+                    time_part = formatted[t_idx:]
+                    last_dash = time_part.rfind('-')
+                    if last_dash > 6:  # After HH:MM:SS
+                        dt_part = formatted[:t_idx + last_dash]
+                        tz_part = time_part[last_dash + 1:]
+                        formatted = f"{dt_part}.000-{tz_part}"
+        else:
+            # Naive datetime - just append .000
+            formatted = f"{formatted}.000"
+
+    return formatted
+
+
 def safe_str(value):
     """Safely convert any value to a clean string for display.
 
     Handles:
     - None values
+    - Datetime/timestamp values (preserves original timezone, no local conversion)
     - Special float values (NaN, Infinity)
     - Control characters and null bytes
     - Invalid UTF-8 sequences
@@ -192,6 +243,12 @@ def safe_str(value):
         # Handle None
         if value is None:
             return None
+
+        # Handle datetime values - preserve original timezone without conversion
+        # This must be checked before str() which would convert to local timezone
+        timestamp_str = normalize_timestamp_for_display(value)
+        if timestamp_str is not None:
+            return timestamp_str
 
         # Handle special float values
         if isinstance(value, float):
