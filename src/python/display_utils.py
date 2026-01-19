@@ -3,7 +3,9 @@ Display utilities for rendering DataFrames and data structures as HTML.
 Mimics Databricks display() functionality.
 """
 from datetime import datetime
-
+from pyspark.sql import functions as F
+import pandas as pd
+import time
 # SVG icons for data types (inline, 14x14 viewBox)
 # Covers all Databricks SQL types
 TYPE_ICONS = {
@@ -238,6 +240,7 @@ def safe_str(value):
     - Control characters and null bytes
     - Invalid UTF-8 sequences
     - Very long strings
+    - Extreme dates that may cause overflow errors
     """
     try:
         # Handle None
@@ -246,9 +249,15 @@ def safe_str(value):
 
         # Handle datetime values - preserve original timezone without conversion
         # This must be checked before str() which would convert to local timezone
-        timestamp_str = normalize_timestamp_for_display(value)
-        if timestamp_str is not None:
-            return timestamp_str
+        # Wrap in try-except to handle edge cases with extreme dates
+        try:
+            timestamp_str = normalize_timestamp_for_display(value)
+            if timestamp_str is not None:
+                return timestamp_str
+        except (OSError, OverflowError, ValueError):
+            # For datetime values that can't be processed (e.g., far future dates),
+            # fall through to string conversion which may still work
+            pass
 
         # Handle special float values
         if isinstance(value, float):
@@ -333,7 +342,6 @@ def convert_to_html(obj):
 
     # Check if it's a Pandas DataFrame
     try:
-        import pandas as pd
         if isinstance(obj, pd.DataFrame):
             return pandas_dataframe_to_html(obj)
     except ImportError:
@@ -351,10 +359,89 @@ def convert_to_html(obj):
     return f'<pre>{str(obj)}</pre>'
 
 
+def _safe_collect_with_timestamps(df, schema, limit):
+    """
+    Safely collect DataFrame rows, handling timestamp overflow errors.
+
+    Extreme dates (e.g., year 4712-12-31 used as "end of time" in Oracle)
+    can cause [Errno 22] Invalid argument when Spark converts timestamps
+    to Python datetime objects. This function detects such errors and
+    retries by casting timestamp columns to strings before collecting.
+
+    Args:
+        df: Spark DataFrame to collect
+        schema: DataFrame schema
+        limit: Maximum number of rows to collect
+
+    Returns:
+        List of Row objects (with timestamps as strings if overflow detected)
+    """
+    try:
+        # First, try normal collection
+        return df.limit(limit).collect()
+    except OSError as e:
+        # OSError with errno 22 indicates timestamp overflow
+        # Retry with timestamps cast to strings
+        if e.errno == 22 or "Invalid argument" in str(e):
+            return _collect_with_string_timestamps(df, schema, limit)
+        raise
+    except Exception as e:
+        # Some Spark versions may wrap the error differently
+        if "Invalid argument" in str(e) or "Errno 22" in str(e):
+            return _collect_with_string_timestamps(df, schema, limit)
+        raise
+
+
+def _collect_with_string_timestamps(df, schema, limit):
+    """
+    Collect DataFrame with timestamp/date columns cast to strings.
+
+    This avoids Python datetime overflow errors for extreme dates
+    by letting Spark handle the string formatting instead of Python.
+
+    Args:
+        df: Spark DataFrame to collect
+        schema: DataFrame schema
+        limit: Maximum number of rows to collect
+
+    Returns:
+        List of Row objects with timestamp columns as ISO-formatted strings
+    """
+    # Identify timestamp and date columns
+    timestamp_cols = [
+        field.name for field in schema.fields
+        if any(t in str(field.dataType).lower() for t in ['timestamp', 'date'])
+    ]
+
+    if not timestamp_cols:
+        # No timestamp columns, shouldn't happen but fallback to normal collect
+        return df.limit(limit).collect()
+
+    # Cast timestamp columns to ISO format strings
+    df_safe = df
+    for col_name in timestamp_cols:
+        col_type = str(schema[col_name].dataType).lower()
+
+        if 'timestamp' in col_type:
+            # Use date_format for timestamp - produces ISO 8601 format
+            # Format: yyyy-MM-dd'T'HH:mm:ss.SSSXXX (e.g., 2024-01-15T10:30:00.000+00:00)
+            df_safe = df_safe.withColumn(
+                col_name,
+                F.date_format(F.col(col_name), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+            )
+        elif 'date' in col_type:
+            # Use date_format for date columns
+            df_safe = df_safe.withColumn(
+                col_name,
+                F.date_format(F.col(col_name), "yyyy-MM-dd")
+            )
+
+    return df_safe.limit(limit).collect()
+
+
 def spark_dataframe_to_html(df, limit=100, execution_time=None):
     """Convert Spark DataFrame to HTML table with Databricks-style minimal theme."""
     try:
-        import time
         start_time = time.time()
 
         # Get schema
@@ -364,8 +451,10 @@ def spark_dataframe_to_html(df, limit=100, execution_time=None):
         # Create type map for efficient lookup
         type_map = {field.name: str(field.dataType).lower() for field in schema.fields}
 
-        # Collect data (limit rows for performance)
-        rows = df.limit(limit).collect()
+        # Collect data with timestamp safety handling
+        # Extreme dates (e.g., year 4712) can cause [Errno 22] Invalid argument
+        # when Spark converts timestamps to Python datetime objects
+        rows = _safe_collect_with_timestamps(df, schema, limit)
         row_count = df.count()
 
         # Calculate runtime if not provided
