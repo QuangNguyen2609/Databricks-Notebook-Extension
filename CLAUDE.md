@@ -252,6 +252,8 @@ Use the "close-then-open" pattern:
 
 ## Version History Notes
 
+- v0.3.11: Fixed timestamp overflow error for extreme dates (e.g., year 4712)
+- v0.3.10: %pip magic command support for Jupyter-style package management
 - v0.0.6: Unified tab experience for notebook button, enhanced Python kernel discovery
 - v0.0.5: SQL auto-detection, SQL cell serialization fix
 - v0.0.4: Scrollable output, git diff fix
