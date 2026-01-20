@@ -489,10 +489,14 @@ def spark_dataframe_to_html(df, limit=None, execution_time=None):
 
         # Add table wrapper
         html += '<div class="dataframe-table-wrapper">'
-        html += f'<table class="dataframe-table" data-col-count="{len(columns)}">'
+        html += f'<table class="dataframe-table" data-col-count="{len(columns) + 1}">'
 
         # Header with type icons, sort indicators and resize handles
         html += '<thead><tr>'
+        # Add index column header (no text, no sort/resize)
+        html += '<th class="index-column" data-col-index="-1">'
+        html += '<span class="th-content"></span>'  # Empty header
+        html += '</th>'
         for i, field in enumerate(schema.fields):
             icon_svg, type_name = get_spark_type_info(field.dataType)
             html += f'<th data-col-index="{i}">'
@@ -505,8 +509,10 @@ def spark_dataframe_to_html(df, limit=None, execution_time=None):
 
         # Body
         html += '<tbody>'
-        for row in rows:
+        for row_idx, row in enumerate(rows, start=1):
             html += '<tr>'
+            # Add index cell first
+            html += f'<td class="index-cell">{row_idx}</td>'
             for col in columns:
                 try:
                     value = row[col]
@@ -568,10 +574,14 @@ def pandas_dataframe_to_html(df, limit=None, execution_time=None):
         # Build HTML manually for consistent styling
         html = _get_html_table_start()
         html += '<div class="dataframe-table-wrapper">'
-        html += f'<table class="dataframe-table" data-col-count="{len(columns)}">'
+        html += f'<table class="dataframe-table" data-col-count="{len(columns) + 1}">'
 
         # Header with type icons, sort indicators and resize handles
         html += '<thead><tr>'
+        # Add index column header (no text, no sort/resize)
+        html += '<th class="index-column" data-col-index="-1">'
+        html += '<span class="th-content"></span>'  # Empty header
+        html += '</th>'
         for i, col in enumerate(columns):
             icon_svg, type_name = get_pandas_type_info(limited_df[col].dtype)
             html += f'<th data-col-index="{i}">'
@@ -584,8 +594,10 @@ def pandas_dataframe_to_html(df, limit=None, execution_time=None):
 
         # Body
         html += '<tbody>'
-        for _, row in limited_df.iterrows():
+        for row_idx, (_, row) in enumerate(limited_df.iterrows(), start=1):
             html += '<tr>'
+            # Add index cell first
+            html += f'<td class="index-cell">{row_idx}</td>'
             for col in columns:
                 try:
                     val = row[col]
@@ -806,6 +818,41 @@ def _get_html_table_start(include_style=True):
         .dataframe-table th .resize-handle:hover {
             background: rgba(100, 150, 255, 0.3);
         }
+        /* Index column header styling */
+        .dataframe-table th.index-column {
+            background-color: #2a2a2a;
+            width: 70px;
+            min-width: 70px;
+            max-width: 70px;
+            text-align: center;
+            cursor: default;
+            color: #808080;
+            font-weight: 600;
+            position: sticky;
+            left: 0;
+            z-index: 11;
+        }
+        .dataframe-table th.index-column:hover {
+            background-color: #2a2a2a; /* No hover effect */
+        }
+        /* Index cell styling */
+        .dataframe-table td.index-cell {
+            background-color: #252526;
+            color: #808080;
+            text-align: center;
+            font-weight: 500;
+            font-size: 12px;
+            width: 70px;
+            min-width: 70px;
+            max-width: 70px;
+            position: sticky;
+            left: 0;
+            z-index: 5;
+            border-right: 1px solid #3a3a3a;
+        }
+        .dataframe-table tr:hover td.index-cell {
+            background-color: #2d2d2d; /* Slightly lighter on row hover */
+        }
         .dataframe-table td {
             border-bottom: 1px solid #2d2d2d;
             border-right: 1px solid #2d2d2d;
@@ -931,9 +978,14 @@ def _get_html_table_start(include_style=True):
 
             let csv = [];
 
-            // Get headers
+            // Get headers (including index column)
             const headers = Array.from(table.querySelectorAll('thead th'))
-                .map(th => th.textContent.trim());
+                .map(th => {
+                    if (th.classList.contains('index-column')) {
+                        return 'Row';  // Label for index column in CSV
+                    }
+                    return th.textContent.trim();
+                });
             csv.push(headers.join(','));
 
             // Get data rows (only from tbody)
@@ -1035,8 +1087,15 @@ def _get_html_table_start(include_style=True):
                 return compareValues(aText, bText, ascending);
             });
 
-            // Re-append rows in sorted order
-            rows.forEach(row => tbody.appendChild(row));
+            // Re-append rows in sorted order and update indices
+            rows.forEach((row, idx) => {
+                tbody.appendChild(row);
+                // Update index cell to reflect new visual position
+                const indexCell = row.querySelector('.index-cell');
+                if (indexCell) {
+                    indexCell.textContent = idx + 1;
+                }
+            });
         }
 
         // Initialize table immediately
@@ -1050,7 +1109,9 @@ def _get_html_table_start(include_style=True):
 
             // Calculate equal width based on container (equal distribution)
             const containerWidth = wrapper ? wrapper.offsetWidth : 800;
-            const colWidth = Math.max(120, Math.floor(containerWidth / colCount));
+            const indexColumnWidth = 70;  // Fixed width for index column
+            const availableWidth = containerWidth - indexColumnWidth;
+            const colWidth = Math.max(120, Math.floor(availableWidth / colCount));
 
             // Set CSS variable for column width
             table.style.setProperty('--col-width', colWidth + 'px');
@@ -1101,6 +1162,11 @@ def _get_html_table_start(include_style=True):
             const sortStates = new Map(); // Track sort state per column
 
             headers.forEach((header, index) => {
+                // Skip index column for sorting and resizing
+                if (header.classList.contains('index-column')) {
+                    return;
+                }
+
                 sortStates.set(index, 'none');
 
                 // Click on header (but not resize handle or type icon) to sort
