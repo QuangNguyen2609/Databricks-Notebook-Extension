@@ -5,6 +5,18 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-01-20
+
+### Added
+- **Row Index Column in DataFrame Tables**: Added a leftmost column displaying sequential row numbers
+  - Visual row numbering starting from 1, 2, 3...
+  - Empty header cell with distinct styling (darker background, centered)
+  - Fixed width (70px) with sticky positioning for horizontal scroll
+  - Automatic re-numbering after sorting (indices reflect current visual order, not original data position)
+  - Included in CSV exports with "Row" header
+  - Index column excluded from sorting and resizing interactions
+  - Applies to both Spark and Pandas DataFrames
+
 ## [0.4.0] - 2026-01-20
 
 ### Added
