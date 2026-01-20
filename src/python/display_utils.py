@@ -361,12 +361,19 @@ def convert_to_html(obj):
 
 def _safe_collect_with_timestamps(df, schema, limit):
     """
-    Safely collect DataFrame rows, handling timestamp overflow errors.
+    Safely collect DataFrame rows with timestamps preserved as original values.
 
-    Extreme dates (e.g., year 4712-12-31 used as "end of time" in Oracle)
-    can cause [Errno 22] Invalid argument when Spark converts timestamps
-    to Python datetime objects. This function detects such errors and
-    retries by casting timestamp columns to strings before collecting.
+    Converts timestamp columns to ISO-formatted strings SERVER-SIDE to prevent
+    the Python client from converting them to local timezone during collection.
+    This ensures timestamps are displayed exactly as stored in Databricks.
+
+    Background: When using collect(), Spark transfers timestamps as UTC instants,
+    but Python's Spark connector converts them to datetime objects using the
+    LOCAL SYSTEM TIMEZONE (not the session timezone). By converting to strings
+    server-side, we preserve the original timestamp representation.
+
+    This also handles extreme dates (e.g., year 4712-12-31) that would cause
+    [Errno 22] Invalid argument when Python tries to create datetime objects.
 
     Args:
         df: Spark DataFrame to collect
@@ -374,22 +381,20 @@ def _safe_collect_with_timestamps(df, schema, limit):
         limit: Maximum number of rows to collect
 
     Returns:
-        List of Row objects (with timestamps as strings if overflow detected)
+        List of Row objects (with timestamps as ISO-formatted strings)
     """
-    try:
-        # First, try normal collection
-        return df.limit(limit).collect()
-    except OSError as e:
-        # OSError with errno 22 indicates timestamp overflow
-        # Retry with timestamps cast to strings
-        if e.errno == 22 or "Invalid argument" in str(e):
-            return _collect_with_string_timestamps(df, schema, limit)
-        raise
-    except Exception as e:
-        # Some Spark versions may wrap the error differently
-        if "Invalid argument" in str(e) or "Errno 22" in str(e):
-            return _collect_with_string_timestamps(df, schema, limit)
-        raise
+    # Check if there are any timestamp/date columns
+    timestamp_cols = [
+        field.name for field in schema.fields
+        if any(t in str(field.dataType).lower() for t in ['timestamp', 'date'])
+    ]
+
+    if timestamp_cols:
+        # Convert timestamps to strings server-side to prevent local timezone conversion
+        return _collect_with_string_timestamps(df, schema, limit)
+
+    # No timestamp columns - safe to collect normally
+    return df.limit(limit).collect()
 
 
 def _collect_with_string_timestamps(df, schema, limit):
