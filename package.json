@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.3.12",
+  "version": "0.4.0",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "databricks-notebook-studio",
@@ -206,6 +206,13 @@
           "type": "string",
           "default": "",
           "description": "Custom path to .env file for kernel environment variables. Can be absolute or relative to workspace. If empty, .env files are loaded from notebook directory and workspace root."
+        },
+        "databricks-notebook.dataDisplayLimit": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "Maximum number of rows to display for DataFrames (Spark and Pandas). Default: 1000"
         }
       },
       "configurationDefaults": {

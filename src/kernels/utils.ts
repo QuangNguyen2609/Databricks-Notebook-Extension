@@ -107,6 +107,10 @@ export function buildKernelEnvironment(
     env.DATABRICKS_WORKSPACE_ROOT = workspaceRoot;
   }
 
+  // Add data display limit configuration
+  const dataDisplayLimit = getDataDisplayLimit(1000);
+  env.DATABRICKS_DATA_DISPLAY_LIMIT = dataDisplayLimit.toString();
+
   return env;
 }
 
@@ -296,4 +300,15 @@ export function getKernelStartupTimeout(defaultTimeout: number): number {
   return vscode.workspace
     .getConfiguration('databricks-notebook')
     .get<number>('kernelStartupTimeout', defaultTimeout);
+}
+
+/**
+ * Get the configured data display limit for DataFrames
+ * @param defaultLimit - Default limit to use if not configured
+ * @returns Configured limit or default
+ */
+export function getDataDisplayLimit(defaultLimit: number): number {
+  return vscode.workspace
+    .getConfiguration('databricks-notebook')
+    .get<number>('dataDisplayLimit', defaultLimit);
 }

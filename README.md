@@ -167,6 +167,7 @@ Configure the extension in VS Code settings (`Cmd+,` or `Ctrl+,`):
 | `databricks-notebook.defaultProfile` | `""` | Default Databricks profile to use on startup (leave empty to remember last selection) |
 | `databricks-notebook.showProfileInStatusBar` | `true` | Show the current Databricks profile in the status bar |
 | `databricks-notebook.pythonExecutionTimeout` | `60000` | Timeout for Python cell execution in milliseconds |
+| `databricks-notebook.dataDisplayLimit` | `1000` | Maximum number of rows to display for DataFrames (Spark and Pandas) |
 
 **Example settings.json:**
 ```json
