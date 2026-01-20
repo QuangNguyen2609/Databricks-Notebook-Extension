@@ -196,6 +196,7 @@ Databricks Connect is auto-initialized on kernel start if configured in `~/.data
 | `databricks-notebook.pythonExecutionTimeout` | `60000` | Cell execution timeout (ms) |
 | `databricks-notebook.enableScrollableOutput` | `true` | Enable scrollable output |
 | `databricks-notebook.dotenvPath` | `""` | Custom path to .env file for kernel environment |
+| `databricks-notebook.dataDisplayLimit` | `1000` | Maximum rows to display for DataFrames |
 
 ## Testing Strategy
 

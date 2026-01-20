@@ -6,6 +6,20 @@ from datetime import datetime
 from pyspark.sql import functions as F
 import pandas as pd
 import time
+import os
+
+# Read data display limit from environment (set by TypeScript)
+# Default to 1000 if not set (backward compatibility)
+try:
+    DATA_DISPLAY_LIMIT = int(os.environ.get('DATABRICKS_DATA_DISPLAY_LIMIT', '1000'))
+    # Validate range to prevent issues
+    if DATA_DISPLAY_LIMIT < 1:
+        DATA_DISPLAY_LIMIT = 1
+    elif DATA_DISPLAY_LIMIT > 100000:
+        DATA_DISPLAY_LIMIT = 100000
+except (ValueError, TypeError):
+    DATA_DISPLAY_LIMIT = 1000
+
 # SVG icons for data types (inline, 14x14 viewBox)
 # Covers all Databricks SQL types
 TYPE_ICONS = {
@@ -444,10 +458,14 @@ def _collect_with_string_timestamps(df, schema, limit):
     return df_safe.limit(limit).collect()
 
 
-def spark_dataframe_to_html(df, limit=100, execution_time=None):
+def spark_dataframe_to_html(df, limit=None, execution_time=None):
     """Convert Spark DataFrame to HTML table with Databricks-style minimal theme."""
     try:
         start_time = time.time()
+
+        # Use configured limit if not explicitly provided
+        if limit is None:
+            limit = DATA_DISPLAY_LIMIT
 
         # Get schema
         schema = df.schema
@@ -526,11 +544,15 @@ def spark_dataframe_to_html(df, limit=100, execution_time=None):
         return f'<pre>Error displaying DataFrame: {str(e)}</pre>'
 
 
-def pandas_dataframe_to_html(df, limit=100, execution_time=None):
+def pandas_dataframe_to_html(df, limit=None, execution_time=None):
     """Convert Pandas DataFrame to HTML table with Databricks-style minimal theme."""
     try:
         import time
         start_time = time.time()
+
+        # Use configured limit if not explicitly provided
+        if limit is None:
+            limit = DATA_DISPLAY_LIMIT
 
         limited_df = df.head(limit)
         row_count = len(df)

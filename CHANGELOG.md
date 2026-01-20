@@ -5,6 +5,17 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-01-20
+
+### Added
+- **Configurable DataFrame Display Limit**: New setting to control maximum rows displayed for DataFrames
+  - New configuration: `databricks-notebook.dataDisplayLimit` (default: 1000 rows)
+  - Applies to both Spark and Pandas DataFrames
+  - Configurable range: 1 to 100,000 rows
+  - Default increased from hardcoded 100 to 1000 rows (10x improvement)
+  - Configuration passed from TypeScript to Python via environment variable
+  - Validation ensures values stay within safe memory limits
+
 ## [0.3.12] - 2025-01-20
 
 ### Fixed
