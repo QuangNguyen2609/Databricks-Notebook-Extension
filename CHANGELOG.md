@@ -5,6 +5,17 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] - 2025-01-20
+
+### Fixed
+- **Timestamp Timezone Preservation**: Fixed timestamps being converted to local timezone during DataFrame display
+  - Root cause: Spark Connect's `collect()` converts timestamps to local system timezone, not session timezone
+  - Solution: All timestamp/date columns are now converted to ISO-formatted strings server-side (in Spark) before collection
+  - Timestamps now display exactly as stored in Databricks (e.g., UTC timestamps remain UTC, not converted to Adelaide/EST/etc.)
+  - Prevents the issue where `2025-01-01T00:00:00+00:00` was incorrectly displayed as `2025-01-01T10:30:00+10:30`
+  - Applies to all DataFrames with timestamp columns, not just extreme dates
+  - Server-side string conversion using `date_format()` ensures consistent timezone representation
+
 ## [0.3.11] - 2025-01-19
 
 ### Fixed
