@@ -821,9 +821,9 @@ def _get_html_table_start(include_style=True):
         /* Index column header styling */
         .dataframe-table th.index-column {
             background-color: #2a2a2a;
-            width: 70px;
-            min-width: 70px;
-            max-width: 70px;
+            width: 50px;
+            min-width: 50px;
+            max-width: 50px;
             text-align: center;
             cursor: default;
             color: #808080;
@@ -842,9 +842,9 @@ def _get_html_table_start(include_style=True):
             text-align: center;
             font-weight: 500;
             font-size: 12px;
-            width: 70px;
-            min-width: 70px;
-            max-width: 70px;
+            width: 50px;
+            min-width: 50px;
+            max-width: 50px;
             position: sticky;
             left: 0;
             z-index: 5;
@@ -1101,10 +1101,213 @@ def _get_html_table_start(include_style=True):
             outline: 2px solid #e67e22;
             outline-offset: -2px;
         }
+        /* Column Selector Container - inside search toolbar */
+        .column-selector-container {
+            position: static;
+            margin-left: 4px;
+            flex-shrink: 0;
+        }
+        /* Column Selector Button */
+        .column-selector-btn {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            min-width: 28px;
+            min-height: 28px;
+            background: #2d2d2d;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #d4d4d4;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            padding: 0;
+            box-sizing: border-box;
+            pointer-events: auto;
+        }
+        .column-selector-btn svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            pointer-events: none;
+        }
+        .column-selector-btn:hover {
+            background: #3a3a3a;
+            border-color: #4a4a4a;
+        }
+        .column-selector-btn.active {
+            background: #007acc;
+            border-color: #007acc;
+        }
+        /* Dropdown Panel - fixed position to avoid clipping */
+        .column-selector-dropdown {
+            position: fixed;
+            width: 280px;
+            max-height: 400px;
+            background: #252526;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            z-index: 10000;
+            display: none;
+            flex-direction: column;
+        }
+        /* Column Header (search + reset) */
+        .column-header {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            border-bottom: 1px solid #3a3a3a;
+            gap: 8px;
+        }
+        /* Search Wrapper with Select All */
+        .column-search-wrapper {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            gap: 8px;
+        }
+        /* Select All Checkbox */
+        .select-all-checkbox {
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+            accent-color: #007acc;
+            cursor: pointer;
+        }
+        .column-search-input {
+            flex: 1;
+            padding: 6px 10px;
+            background: #1e1e1e;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-size: 13px;
+            outline: none;
+        }
+        .column-search-input:focus {
+            border-color: #007acc;
+        }
+        .column-search-input::placeholder {
+            color: #808080;
+        }
+        /* Reset Button */
+        .column-reset-btn {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            background: transparent;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #808080;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .column-reset-btn:hover {
+            background: #2d2d2d;
+            border-color: #4a4a4a;
+            color: #d4d4d4;
+        }
+        .column-reset-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        /* Column List */
+        .column-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 0;
+            max-height: 320px;
+        }
+        /* Column Item */
+        .column-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 12px;
+            cursor: pointer;
+            transition: background 0.1s ease;
+        }
+        .column-item:hover {
+            background: #2d2d2d;
+        }
+        /* Pin Button */
+        .column-item .pin-btn {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            padding: 2px;
+            margin-right: 6px;
+            background: transparent;
+            border: none;
+            color: #606060;
+            cursor: pointer;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.15s ease;
+        }
+        .column-item .pin-btn:hover {
+            color: #d4d4d4;
+            background: #3a3a3a;
+        }
+        .column-item .pin-btn[data-pinned="true"] {
+            color: #007acc;
+        }
+        .column-item .pin-btn[data-pinned="true"]:hover {
+            color: #3399dd;
+        }
+        /* Pinned items get subtle highlight */
+        .column-item.pinned {
+            background: rgba(0, 122, 204, 0.1);
+        }
+        .column-item .col-type-icon {
+            flex-shrink: 0;
+            margin-right: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            color: #808080;
+        }
+        .column-item .col-type-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+        .column-item .column-name {
+            flex: 1;
+            font-size: 13px;
+            color: #d4d4d4;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .column-item input[type="checkbox"] {
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+            margin-left: 8px;
+            accent-color: #007acc;
+            cursor: pointer;
+        }
+        .column-item.filtered-out {
+            display: none;
+        }
+        /* Hidden column indicator */
+        th.column-hidden,
+        td.column-hidden {
+            display: none !important;
+        }
         '''
         html += '</style>'
 
-        # Add search toolbar
+        # Add search toolbar with column selector
         html += '''
         <div class="dataframe-search-toolbar">
             <div class="search-input-wrapper">
@@ -1122,6 +1325,31 @@ def _get_html_table_start(include_style=True):
                 <button class="search-nav-btn search-next" title="Next match (Enter)">&#x25BC;</button>
             </div>
             <button class="search-case-toggle" data-active="false" title="Match case">Aa</button>
+            <div class="column-selector-container">
+                <button class="column-selector-btn" title="Select columns">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M1.5 2.5h3v11h-3v-11zm5 0h3v11h-3v-11zm5 0h3v11h-3v-11z" fill-opacity="0.8"/>
+                        <rect x="1.5" y="2.5" width="3" height="11" fill="none" stroke="currentColor" stroke-width="0.5"/>
+                        <rect x="6.5" y="2.5" width="3" height="11" fill="none" stroke="currentColor" stroke-width="0.5"/>
+                        <rect x="11.5" y="2.5" width="3" height="11" fill="none" stroke="currentColor" stroke-width="0.5"/>
+                    </svg>
+                </button>
+                <div class="column-selector-dropdown">
+                    <div class="column-header">
+                        <div class="column-search-wrapper">
+                            <input type="checkbox" class="select-all-checkbox" checked title="Select/Deselect all" />
+                            <input type="text" class="column-search-input" placeholder="Search for column" />
+                        </div>
+                        <button class="column-reset-btn" title="Reset to all columns">
+                            <svg viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+                                <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="column-list"></div>
+                </div>
+            </div>
         </div>
         '''
 
@@ -1265,7 +1493,7 @@ def _get_html_table_start(include_style=True):
 
             // Calculate equal width based on container (equal distribution)
             const containerWidth = wrapper ? wrapper.offsetWidth : 800;
-            const indexColumnWidth = 70;  // Fixed width for index column
+            const indexColumnWidth = 50;  // Fixed width for index column
             const availableWidth = containerWidth - indexColumnWidth;
             const colWidth = Math.max(120, Math.floor(availableWidth / colCount));
 
@@ -1596,6 +1824,344 @@ def _get_html_table_start(include_style=True):
 
             // Initialize button states
             updateUI();
+        })();
+
+        // ============================================
+        // COLUMN SELECTION FUNCTIONALITY
+        // ============================================
+        (function() {
+            // Use event delegation on document for VS Code compatibility
+            document.addEventListener('click', function(e) {
+                // Handle column selector button click
+                var btn = e.target.closest('.column-selector-btn');
+                if (btn) {
+                    e.stopPropagation();
+                    var container = btn.closest('.column-selector-container');
+                    var dropdown = container ? container.querySelector('.column-selector-dropdown') : null;
+                    if (!dropdown) return;
+
+                    var isVisible = dropdown.style.display === 'flex';
+
+                    if (!isVisible) {
+                        // Position the dropdown below the button using fixed positioning
+                        var rect = btn.getBoundingClientRect();
+                        dropdown.style.top = (rect.bottom + 4) + 'px';
+                        dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+                        dropdown.style.display = 'flex';
+                        btn.classList.add('active');
+
+                        // Initialize column list on first open
+                        if (!dropdown.getAttribute('data-init')) {
+                            initColumnList(dropdown);
+                            dropdown.setAttribute('data-init', 'true');
+                        }
+                    } else {
+                        dropdown.style.display = 'none';
+                        btn.classList.remove('active');
+                    }
+                    return;
+                }
+
+                // Handle pin button click
+                var pinBtn = e.target.closest('.pin-btn');
+                if (pinBtn) {
+                    e.stopPropagation();
+                    var colKey = pinBtn.getAttribute('data-col-key');
+                    var dropdown = pinBtn.closest('.column-selector-dropdown');
+
+                    // Toggle pin state
+                    if (pinnedColumns[colKey]) {
+                        delete pinnedColumns[colKey];
+                    } else {
+                        pinnedColumns[colKey] = true;
+                    }
+
+                    // Re-render list to reorder
+                    if (dropdown) {
+                        var table = document.querySelector('.dataframe-table');
+                        var columnList = dropdown.querySelector('.column-list');
+                        var searchInput = dropdown.querySelector('.column-search-input');
+                        if (table && columnList) {
+                            var headers = table.querySelectorAll('thead th');
+                            var columns = [];
+                            for (var i = 1; i < headers.length; i++) {
+                                var header = headers[i];
+                                var typeIcon = header.querySelector('.type-icon');
+                                var thContent = header.querySelector('.th-content');
+                                var columnName = thContent ? thContent.textContent.trim() : header.textContent.trim();
+                                var typeName = typeIcon ? typeIcon.getAttribute('data-type') : 'unknown';
+                                var iconHtml = typeIcon ? typeIcon.innerHTML : '';
+                                columns.push({
+                                    index: i - 1,
+                                    name: columnName,
+                                    typeName: typeName,
+                                    iconHtml: iconHtml
+                                });
+                            }
+
+                            // Get current checkbox states before re-render
+                            var checkboxStates = {};
+                            var checkboxes = columnList.querySelectorAll('input[type="checkbox"]');
+                            for (var j = 0; j < checkboxes.length; j++) {
+                                var idx = checkboxes[j].getAttribute('data-col-index');
+                                checkboxStates[idx] = checkboxes[j].checked;
+                            }
+
+                            renderColumnList(columnList, columns);
+
+                            // Restore checkbox states
+                            checkboxes = columnList.querySelectorAll('input[type="checkbox"]');
+                            for (var j = 0; j < checkboxes.length; j++) {
+                                var idx = checkboxes[j].getAttribute('data-col-index');
+                                if (checkboxStates[idx] !== undefined) {
+                                    checkboxes[j].checked = checkboxStates[idx];
+                                }
+                            }
+
+                            // Reapply search filter if any
+                            if (searchInput && searchInput.value) {
+                                var query = searchInput.value.toLowerCase();
+                                var items = columnList.querySelectorAll('.column-item');
+                                for (var j = 0; j < items.length; j++) {
+                                    var name = items[j].querySelector('.column-name').textContent.toLowerCase();
+                                    items[j].style.display = name.indexOf(query) >= 0 ? 'flex' : 'none';
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                // Handle reset button click
+                var resetBtn = e.target.closest('.column-reset-btn');
+                if (resetBtn) {
+                    e.stopPropagation();
+                    var dropdown = resetBtn.closest('.column-selector-dropdown');
+                    var columnList = dropdown ? dropdown.querySelector('.column-list') : null;
+                    var searchInput = dropdown ? dropdown.querySelector('.column-search-input') : null;
+
+                    // Clear all pins
+                    pinnedColumns = {};
+
+                    if (columnList) {
+                        var checkboxes = columnList.querySelectorAll('input[type="checkbox"]');
+                        for (var j = 0; j < checkboxes.length; j++) {
+                            if (!checkboxes[j].checked) {
+                                checkboxes[j].checked = true;
+                                var colIdx = parseInt(checkboxes[j].getAttribute('data-col-index'));
+                                toggleColVisibility(colIdx + 1, true);
+                            }
+                        }
+
+                        // Re-render to clear pin states
+                        var table = document.querySelector('.dataframe-table');
+                        if (table && dropdown) {
+                            var headers = table.querySelectorAll('thead th');
+                            var columns = [];
+                            for (var i = 1; i < headers.length; i++) {
+                                var header = headers[i];
+                                var typeIcon = header.querySelector('.type-icon');
+                                var thContent = header.querySelector('.th-content');
+                                var columnName = thContent ? thContent.textContent.trim() : header.textContent.trim();
+                                var typeName = typeIcon ? typeIcon.getAttribute('data-type') : 'unknown';
+                                var iconHtml = typeIcon ? typeIcon.innerHTML : '';
+                                columns.push({
+                                    index: i - 1,
+                                    name: columnName,
+                                    typeName: typeName,
+                                    iconHtml: iconHtml
+                                });
+                            }
+                            renderColumnList(columnList, columns);
+
+                            // Check all boxes after reset
+                            checkboxes = columnList.querySelectorAll('input[type="checkbox"]');
+                            for (var j = 0; j < checkboxes.length; j++) {
+                                checkboxes[j].checked = true;
+                            }
+                        }
+
+                        var items = columnList.querySelectorAll('.column-item');
+                        for (var j = 0; j < items.length; j++) {
+                            items[j].style.display = 'flex';
+                        }
+                    }
+                    if (searchInput) searchInput.value = '';
+                    updateSelectAllState(dropdown);
+                    return;
+                }
+
+                // Handle select all checkbox click
+                var selectAll = e.target.closest('.select-all-checkbox');
+                if (selectAll) {
+                    e.stopPropagation();
+                    var dropdown = selectAll.closest('.column-selector-dropdown');
+                    var columnList = dropdown ? dropdown.querySelector('.column-list') : null;
+                    if (columnList) {
+                        var checkboxes = columnList.querySelectorAll('input[type="checkbox"]');
+                        var allChecked = true;
+                        for (var j = 0; j < checkboxes.length; j++) {
+                            if (!checkboxes[j].checked) { allChecked = false; break; }
+                        }
+                        var newState = !allChecked;
+                        for (var j = 0; j < checkboxes.length; j++) {
+                            checkboxes[j].checked = newState;
+                            var colIdx = parseInt(checkboxes[j].getAttribute('data-col-index'));
+                            toggleColVisibility(colIdx + 1, newState);
+                        }
+                        selectAll.checked = newState;
+                        selectAll.indeterminate = false;
+                    }
+                    return;
+                }
+
+                // Close dropdown when clicking outside
+                if (!e.target.closest('.column-selector-container')) {
+                    var dropdowns = document.querySelectorAll('.column-selector-dropdown');
+                    for (var i = 0; i < dropdowns.length; i++) {
+                        dropdowns[i].style.display = 'none';
+                    }
+                    var btns = document.querySelectorAll('.column-selector-btn');
+                    for (var i = 0; i < btns.length; i++) {
+                        btns[i].classList.remove('active');
+                    }
+                }
+            });
+
+            // Handle checkbox changes via event delegation
+            document.addEventListener('change', function(e) {
+                var checkbox = e.target;
+                if (checkbox.type === 'checkbox' && checkbox.hasAttribute('data-col-index')) {
+                    var colIdx = parseInt(checkbox.getAttribute('data-col-index'));
+                    toggleColVisibility(colIdx + 1, checkbox.checked);
+                    var dropdown = checkbox.closest('.column-selector-dropdown');
+                    if (dropdown) updateSelectAllState(dropdown);
+                }
+            });
+
+            // Handle search input
+            document.addEventListener('input', function(e) {
+                if (e.target.classList.contains('column-search-input')) {
+                    var query = e.target.value.toLowerCase();
+                    var dropdown = e.target.closest('.column-selector-dropdown');
+                    var columnList = dropdown ? dropdown.querySelector('.column-list') : null;
+                    if (columnList) {
+                        var items = columnList.querySelectorAll('.column-item');
+                        for (var j = 0; j < items.length; j++) {
+                            var name = items[j].querySelector('.column-name').textContent.toLowerCase();
+                            items[j].style.display = name.indexOf(query) >= 0 ? 'flex' : 'none';
+                        }
+                    }
+                }
+            });
+
+            // Pin state tracking - store pinned column indices
+            var pinnedColumns = {};
+
+            // Pin icons
+            var PIN_ICON_OUTLINE = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v4M4 5h8l-1 4H5l-1-4zM6 9v4M10 9v4M5 13h6"/></svg>';
+            var PIN_ICON_FILLED = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v4M4 5h8l-1 4H5l-1-4zM6 9v4M10 9v4M5 13h6" stroke="currentColor" stroke-width="1.5"/><rect x="4" y="5" width="8" height="4" rx="0.5"/></svg>';
+
+            // Initialize column list
+            function initColumnList(dropdown) {
+                var table = document.querySelector('.dataframe-table');
+                var columnList = dropdown.querySelector('.column-list');
+                if (!table || !columnList) return;
+
+                var headers = table.querySelectorAll('thead th');
+
+                // Store column data
+                var columns = [];
+                for (var i = 1; i < headers.length; i++) {
+                    var header = headers[i];
+                    var typeIcon = header.querySelector('.type-icon');
+                    var thContent = header.querySelector('.th-content');
+                    var columnName = thContent ? thContent.textContent.trim() : header.textContent.trim();
+                    var typeName = typeIcon ? typeIcon.getAttribute('data-type') : 'unknown';
+                    var iconHtml = typeIcon ? typeIcon.innerHTML : '';
+
+                    columns.push({
+                        index: i - 1,
+                        name: columnName,
+                        typeName: typeName,
+                        iconHtml: iconHtml
+                    });
+                }
+
+                renderColumnList(columnList, columns);
+            }
+
+            // Render column list with pinned items at top
+            function renderColumnList(columnList, columns) {
+                columnList.innerHTML = '';
+
+                // Sort: pinned first, then by original order
+                columns.sort(function(a, b) {
+                    var aKey = 'col_' + a.index;
+                    var bKey = 'col_' + b.index;
+                    var aPinned = pinnedColumns[aKey];
+                    var bPinned = pinnedColumns[bKey];
+                    if (aPinned && !bPinned) return -1;
+                    if (!aPinned && bPinned) return 1;
+                    return a.index - b.index;
+                });
+
+                // Render items
+                for (var i = 0; i < columns.length; i++) {
+                    var col = columns[i];
+                    var colKey = 'col_' + col.index;
+                    var isPinned = pinnedColumns[colKey];
+
+                    var item = document.createElement('div');
+                    item.className = 'column-item' + (isPinned ? ' pinned' : '');
+                    item.style.display = 'flex';
+                    item.setAttribute('data-col-index', col.index);
+                    item.innerHTML =
+                        '<button class="pin-btn" data-pinned="' + (isPinned ? 'true' : 'false') + '" data-col-key="' + colKey + '" title="' + (isPinned ? 'Unpin' : 'Pin to top') + '">' +
+                        (isPinned ? PIN_ICON_FILLED : PIN_ICON_OUTLINE) +
+                        '</button>' +
+                        '<span class="col-type-icon" data-type="' + col.typeName + '">' + col.iconHtml + '</span>' +
+                        '<span class="column-name">' + col.name + '</span>' +
+                        '<input type="checkbox" checked data-col-index="' + col.index + '" />';
+                    columnList.appendChild(item);
+                }
+            }
+
+            // Toggle column visibility
+            function toggleColVisibility(colIndex, isVisible) {
+                var table = document.querySelector('.dataframe-table');
+                if (!table) return;
+
+                // Toggle header
+                var headers = table.querySelectorAll('thead th');
+                if (headers[colIndex]) {
+                    headers[colIndex].style.display = isVisible ? '' : 'none';
+                }
+
+                // Toggle cells in all rows
+                var rows = table.querySelectorAll('tbody tr');
+                for (var i = 0; i < rows.length; i++) {
+                    var cell = rows[i].cells[colIndex];
+                    if (cell) {
+                        cell.style.display = isVisible ? '' : 'none';
+                    }
+                }
+            }
+
+            // Update select all checkbox state
+            function updateSelectAllState(dropdown) {
+                var selectAll = dropdown.querySelector('.select-all-checkbox');
+                var columnList = dropdown.querySelector('.column-list');
+                if (!selectAll || !columnList) return;
+
+                var checkboxes = columnList.querySelectorAll('input[type="checkbox"]');
+                var checkedCount = 0;
+                for (var j = 0; j < checkboxes.length; j++) {
+                    if (checkboxes[j].checked) checkedCount++;
+                }
+                selectAll.checked = checkedCount === checkboxes.length;
+                selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+            }
         })();
         </script>
         '''
