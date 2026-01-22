@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "databricks-notebook-studio",
@@ -209,10 +209,11 @@
         },
         "databricks-notebook.dataDisplayLimit": {
           "type": "number",
-          "default": 1000,
+          "default": 100,
           "minimum": 1,
           "maximum": 100000,
-          "description": "Maximum number of rows to display for DataFrames (Spark and Pandas). Default: 1000"
+          "description": "Maximum number of rows to display for DataFrames (Spark and Pandas)",
+          "markdownDescription": "Maximum number of rows to display when rendering **Spark DataFrames** and **Pandas DataFrames** in notebook output.\n\n- **Default:** 100 rows\n- **Range:** 1 - 100,000 rows\n- **Applies to:** Both Spark and Pandas DataFrames\n\n💡 Lower values improve performance for large datasets."
         }
       },
       "configurationDefaults": {

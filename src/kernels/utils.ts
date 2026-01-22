@@ -108,7 +108,7 @@ export function buildKernelEnvironment(
   }
 
   // Add data display limit configuration
-  const dataDisplayLimit = getDataDisplayLimit(1000);
+  const dataDisplayLimit = getDataDisplayLimit(100);
   env.DATABRICKS_DATA_DISPLAY_LIMIT = dataDisplayLimit.toString();
 
   return env;
