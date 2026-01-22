@@ -9,16 +9,16 @@ import time
 import os
 
 # Read data display limit from environment (set by TypeScript)
-# Default to 1000 if not set (backward compatibility)
+# Default to 100 if not set
 try:
-    DATA_DISPLAY_LIMIT = int(os.environ.get('DATABRICKS_DATA_DISPLAY_LIMIT', '1000'))
+    DATA_DISPLAY_LIMIT = int(os.environ.get('DATABRICKS_DATA_DISPLAY_LIMIT', '100'))
     # Validate range to prevent issues
     if DATA_DISPLAY_LIMIT < 1:
         DATA_DISPLAY_LIMIT = 1
     elif DATA_DISPLAY_LIMIT > 100000:
         DATA_DISPLAY_LIMIT = 100000
 except (ValueError, TypeError):
-    DATA_DISPLAY_LIMIT = 1000
+    DATA_DISPLAY_LIMIT = 100
 
 # SVG icons for data types (inline, 14x14 viewBox)
 # Covers all Databricks SQL types

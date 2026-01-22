@@ -5,6 +5,28 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-01-22
+
+### Added
+- **DataFrame Search Functionality**: Added interactive search toolbar for DataFrames
+  - Real-time text search across all cells in the table
+  - Case-sensitive toggle button for precise searching
+  - Search result counter showing current match and total matches (e.g., "1 of 5")
+  - Navigation buttons (Previous/Next) to jump between search matches
+  - Clear button to quickly reset search
+  - Visual highlighting of all matching cells with distinct styling for current match
+  - Search input with icon and placeholder text
+  - Keyboard shortcuts: Enter/Shift+Enter for next/previous match
+  - Applies to both Spark and Pandas DataFrames
+  - Integrated seamlessly with existing DataFrame rendering toolbar
+
+### Changed
+- **DataFrame Display Limit Default**: Changed default from 1000 to 100 rows for better performance
+  - Enhanced markdown description in VS Code settings UI for better discoverability
+  - Added helpful tip in README explaining how to access the setting
+  - Lower default improves rendering performance while remaining useful for most use cases
+  - Users can easily adjust via VS Code settings UI (search "Databricks data display")
+
 ## [0.4.1] - 2026-01-20
 
 ### Added
