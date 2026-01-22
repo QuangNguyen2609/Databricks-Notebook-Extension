@@ -5,6 +5,20 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-01-22
+
+### Added
+- **DataFrame Column Selection**: Added column selector dropdown for showing/hiding columns
+  - Dropdown button in DataFrame toolbar with visual active state
+  - Checkbox list to toggle column visibility (show/hide individual columns)
+  - Pin functionality to keep frequently-used columns at the top of the selector list
+  - Search input to filter columns by name in the selector
+  - "Select All" checkbox to quickly show/hide all columns
+  - Reset button to restore all columns to visible state
+  - Pinned columns display with subtle visual highlight
+  - Fixed positioning to prevent clipping in scrollable containers
+  - Column type icons displayed next to each column name
+  
 ## [0.4.2] - 2026-01-22
 
 ### Added
