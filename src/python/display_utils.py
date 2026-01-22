@@ -821,9 +821,9 @@ def _get_html_table_start(include_style=True):
         /* Index column header styling */
         .dataframe-table th.index-column {
             background-color: #2a2a2a;
-            width: 70px;
-            min-width: 70px;
-            max-width: 70px;
+            width: 50px;
+            min-width: 50px;
+            max-width: 50px;
             text-align: center;
             cursor: default;
             color: #808080;
@@ -842,9 +842,9 @@ def _get_html_table_start(include_style=True):
             text-align: center;
             font-weight: 500;
             font-size: 12px;
-            width: 70px;
-            min-width: 70px;
-            max-width: 70px;
+            width: 50px;
+            min-width: 50px;
+            max-width: 50px;
             position: sticky;
             left: 0;
             z-index: 5;
@@ -1493,7 +1493,7 @@ def _get_html_table_start(include_style=True):
 
             // Calculate equal width based on container (equal distribution)
             const containerWidth = wrapper ? wrapper.offsetWidth : 800;
-            const indexColumnWidth = 70;  // Fixed width for index column
+            const indexColumnWidth = 50;  // Fixed width for index column
             const availableWidth = containerWidth - indexColumnWidth;
             const colWidth = Math.max(120, Math.floor(availableWidth / colCount));
 
