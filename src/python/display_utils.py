@@ -966,8 +966,164 @@ def _get_html_table_start(include_style=True):
         .dataframe-stats {
             color: #cccccc;
         }
+        /* Search toolbar styles */
+        .dataframe-search-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background-color: #252526;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        .search-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+            flex: 1;
+            max-width: 300px;
+        }
+        .search-icon {
+            position: absolute;
+            left: 8px;
+            width: 14px;
+            height: 14px;
+            color: #808080;
+            pointer-events: none;
+        }
+        .search-input {
+            width: 100%;
+            padding: 6px 28px 6px 28px;
+            background-color: #1e1e1e;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-input:focus {
+            border-color: #007acc;
+        }
+        .search-input::placeholder {
+            color: #6a6a6a;
+        }
+        .search-clear-btn {
+            position: absolute;
+            right: 6px;
+            width: 18px;
+            height: 18px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 2px;
+            color: #808080;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0;
+            transition: background-color 0.2s;
+        }
+        .search-clear-btn:hover {
+            background-color: #3a3a3a;
+            color: #cccccc;
+        }
+        .search-input:not(:placeholder-shown) ~ .search-clear-btn {
+            display: flex;
+        }
+        .search-results {
+            display: flex;
+            align-items: center;
+            min-width: 80px;
+        }
+        .search-count {
+            font-size: 11px;
+            color: #cccccc;
+        }
+        .search-count.no-results {
+            color: #f48771;
+        }
+        .search-navigation {
+            display: flex;
+            gap: 2px;
+        }
+        .search-nav-btn {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #2d2d2d;
+            border: 1px solid #3a3a3a;
+            border-radius: 3px;
+            color: #cccccc;
+            cursor: pointer;
+            font-size: 10px;
+            transition: background-color 0.2s;
+        }
+        .search-nav-btn:hover:not(:disabled) {
+            background-color: #3a3a3a;
+        }
+        .search-nav-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .search-case-toggle {
+            width: 28px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #2d2d2d;
+            border: 1px solid #3a3a3a;
+            border-radius: 3px;
+            color: #cccccc;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .search-case-toggle:hover {
+            background-color: #3a3a3a;
+        }
+        .search-case-toggle[data-active="true"] {
+            background-color: #007acc;
+            border-color: #007acc;
+            color: #ffffff;
+        }
+        .search-match {
+            background-color: rgba(230, 126, 34, 0.3) !important;
+        }
+        .search-match-current {
+            background-color: rgba(230, 126, 34, 0.6) !important;
+            outline: 2px solid #e67e22;
+            outline-offset: -2px;
+        }
         '''
         html += '</style>'
+
+        # Add search toolbar
+        html += '''
+        <div class="dataframe-search-toolbar">
+            <div class="search-input-wrapper">
+                <svg class="search-icon" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                </svg>
+                <input type="text" class="search-input" placeholder="Search..." />
+                <button class="search-clear-btn" title="Clear search">&times;</button>
+            </div>
+            <div class="search-results">
+                <span class="search-count"></span>
+            </div>
+            <div class="search-navigation">
+                <button class="search-nav-btn search-prev" title="Previous match (Shift+Enter)">&#x25B2;</button>
+                <button class="search-nav-btn search-next" title="Next match (Enter)">&#x25BC;</button>
+            </div>
+            <button class="search-case-toggle" data-active="false" title="Match case">Aa</button>
+        </div>
+        '''
 
         # Add download script and cell interaction
         html += '''
@@ -1239,6 +1395,207 @@ def _get_html_table_start(include_style=True):
                     });
                 }
             });
+        })();
+
+        // Initialize search functionality
+        (function() {
+            const searchInput = document.querySelector('.search-input');
+            const clearBtn = document.querySelector('.search-clear-btn');
+            const searchCount = document.querySelector('.search-count');
+            const prevBtn = document.querySelector('.search-prev');
+            const nextBtn = document.querySelector('.search-next');
+            const caseToggle = document.querySelector('.search-case-toggle');
+            const table = document.querySelector('.dataframe-table');
+
+            if (!searchInput || !table) return;
+
+            let matches = [];
+            let currentMatchIndex = -1;
+            let caseSensitive = false;
+            let searchTimeout = null;
+
+            // Get text content from a cell, handling special cases
+            function getCellText(cell) {
+                // Skip cells with null badges
+                const nullBadge = cell.querySelector('.null-badge');
+                if (nullBadge) return '';
+
+                // For collapsible cells, get the content span text
+                const cellContent = cell.querySelector('.cell-content');
+                if (cellContent) {
+                    return cellContent.textContent.trim();
+                }
+
+                return cell.textContent.trim();
+            }
+
+            // Clear all search highlights
+            function clearHighlights() {
+                const highlightedCells = table.querySelectorAll('.search-match, .search-match-current');
+                highlightedCells.forEach(cell => {
+                    cell.classList.remove('search-match', 'search-match-current');
+                });
+            }
+
+            // Highlight current match and scroll into view
+            function highlightCurrentMatch() {
+                if (matches.length === 0 || currentMatchIndex < 0) return;
+
+                // Remove current highlight from all
+                const allMatches = table.querySelectorAll('.search-match-current');
+                allMatches.forEach(cell => {
+                    cell.classList.remove('search-match-current');
+                });
+
+                // Add current highlight
+                const currentMatch = matches[currentMatchIndex];
+                if (currentMatch && currentMatch.cell) {
+                    currentMatch.cell.classList.add('search-match-current');
+
+                    // Scroll into view
+                    const wrapper = table.closest('.dataframe-table-wrapper');
+                    if (wrapper) {
+                        const cellRect = currentMatch.cell.getBoundingClientRect();
+                        const wrapperRect = wrapper.getBoundingClientRect();
+
+                        // Check if cell is not fully visible
+                        if (cellRect.top < wrapperRect.top || cellRect.bottom > wrapperRect.bottom) {
+                            currentMatch.cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                }
+            }
+
+            // Update UI (count and button states)
+            function updateUI() {
+                if (matches.length === 0) {
+                    const query = searchInput.value.trim();
+                    if (query) {
+                        searchCount.textContent = 'No results';
+                        searchCount.classList.add('no-results');
+                    } else {
+                        searchCount.textContent = '';
+                        searchCount.classList.remove('no-results');
+                    }
+                    prevBtn.disabled = true;
+                    nextBtn.disabled = true;
+                } else {
+                    searchCount.textContent = `${currentMatchIndex + 1} of ${matches.length}`;
+                    searchCount.classList.remove('no-results');
+                    prevBtn.disabled = false;
+                    nextBtn.disabled = false;
+                }
+            }
+
+            // Perform search
+            function performSearch(query) {
+                // Clear previous search
+                clearHighlights();
+                matches = [];
+                currentMatchIndex = -1;
+
+                if (!query) {
+                    updateUI();
+                    return;
+                }
+
+                // Prepare search string
+                const searchStr = caseSensitive ? query : query.toLowerCase();
+
+                // Search all cells in tbody
+                const tbody = table.querySelector('tbody');
+                if (!tbody) return;
+
+                const rows = tbody.querySelectorAll('tr');
+                rows.forEach((row, rowIndex) => {
+                    const cells = row.querySelectorAll('td');
+                    cells.forEach((cell, cellIndex) => {
+                        const cellText = getCellText(cell);
+                        const compareText = caseSensitive ? cellText : cellText.toLowerCase();
+
+                        if (cellText && compareText.includes(searchStr)) {
+                            // Add to matches
+                            matches.push({
+                                row: row,
+                                cell: cell,
+                                rowIndex: rowIndex,
+                                cellIndex: cellIndex
+                            });
+
+                            // Add highlight class
+                            cell.classList.add('search-match');
+                        }
+                    });
+                });
+
+                // Set first match as current
+                if (matches.length > 0) {
+                    currentMatchIndex = 0;
+                    highlightCurrentMatch();
+                }
+
+                updateUI();
+            }
+
+            // Navigate to next/previous match
+            function navigateMatch(direction) {
+                if (matches.length === 0) return;
+
+                if (direction === 'next') {
+                    currentMatchIndex = (currentMatchIndex + 1) % matches.length;
+                } else if (direction === 'prev') {
+                    currentMatchIndex = (currentMatchIndex - 1 + matches.length) % matches.length;
+                }
+
+                highlightCurrentMatch();
+                updateUI();
+            }
+
+            // Event: Search input with debounce
+            searchInput.addEventListener('input', function() {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    performSearch(this.value.trim());
+                }, 150);
+            });
+
+            // Event: Clear button
+            clearBtn.addEventListener('click', function() {
+                searchInput.value = '';
+                performSearch('');
+                searchInput.focus();
+            });
+
+            // Event: Navigation buttons
+            nextBtn.addEventListener('click', () => navigateMatch('next'));
+            prevBtn.addEventListener('click', () => navigateMatch('prev'));
+
+            // Event: Case sensitivity toggle
+            caseToggle.addEventListener('click', function() {
+                caseSensitive = !caseSensitive;
+                this.setAttribute('data-active', caseSensitive);
+                // Re-run search with new case sensitivity
+                performSearch(searchInput.value.trim());
+            });
+
+            // Event: Keyboard shortcuts
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        navigateMatch('prev');
+                    } else {
+                        navigateMatch('next');
+                    }
+                } else if (e.key === 'Escape') {
+                    searchInput.value = '';
+                    performSearch('');
+                    searchInput.blur();
+                }
+            });
+
+            // Initialize button states
+            updateUI();
         })();
         </script>
         '''
