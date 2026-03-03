@@ -22,7 +22,7 @@ export const ENVIRONMENT_REFRESH_DELAY_MS = 500;
 export const KERNEL_STARTUP_TIMEOUT_MS = 30000;
 
 /** Default execution timeout (ms) */
-export const EXECUTION_TIMEOUT_MS = 60000;
+export const EXECUTION_TIMEOUT_MS = 180000;
 
 /** Default timeout for short operations like ping/reset (ms) */
 export const SHORT_OPERATION_TIMEOUT_MS = 5000;
