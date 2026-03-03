@@ -17,6 +17,7 @@ import {
 } from '../utils/codeTransform';
 import { extractErrorMessage } from '../utils/errorHandler';
 import { showErrorNotification, showInfoMessage } from '../utils/notifications';
+import { getExecutionTimeout } from './utils';
 
 /**
  * NotebookController for a specific Python interpreter
@@ -236,7 +237,7 @@ export class PythonKernelController implements vscode.Disposable {
 
       // Execute the code
       this._isExecuting = true;
-      const result = await this._executor.execute(executableCode);
+      const result = await this._executor.execute(executableCode, getExecutionTimeout());
       this._isExecuting = false;
 
       // Check if interrupted (KeyboardInterrupt)

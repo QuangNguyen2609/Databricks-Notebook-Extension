@@ -303,6 +303,16 @@ export function getKernelStartupTimeout(defaultTimeout: number): number {
 }
 
 /**
+ * Get cell execution timeout from configuration
+ * @returns Timeout in milliseconds
+ */
+export function getExecutionTimeout(): number {
+  return vscode.workspace
+    .getConfiguration('databricks-notebook')
+    .get<number>('pythonExecutionTimeout')!;
+}
+
+/**
  * Get the configured data display limit for DataFrames
  * @param defaultLimit - Default limit to use if not configured
  * @returns Configured limit or default
