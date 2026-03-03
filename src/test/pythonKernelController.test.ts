@@ -150,6 +150,9 @@ const mockVscode = {
   },
   workspace: {
     getWorkspaceFolder: () => ({ uri: { fsPath: '/workspace' } }),
+    getConfiguration: () => ({
+      get: (_key: string, defaultValue?: unknown) => defaultValue,
+    }),
   },
   Disposable: class {
     static from(...disposables: { dispose: () => void }[]) {

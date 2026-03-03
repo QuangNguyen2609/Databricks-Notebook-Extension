@@ -5,6 +5,12 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-03-03
+
+### Fixed
+- **Cell execution timeout now respects VS Code configuration**: The `databricks-notebook.pythonExecutionTimeout` setting was defined but never applied — all cells silently used a hardcoded 60-second limit regardless of the configured value
+- Default execution timeout raised from 60 seconds to **180 seconds (3 minutes)** to better accommodate long-running Databricks serverless SQL queries
+
 ## [0.4.3] - 2026-01-22
 
 ### Added
