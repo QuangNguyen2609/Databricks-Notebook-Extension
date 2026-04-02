@@ -534,10 +534,17 @@ async function handleMagicInPythonCell(
   magic: string,
   languageId: string
 ): Promise<void> {
-  // %pip cells should stay as Python cells (like Jupyter) - don't convert or remove
-  if (magic === '%pip') {
+  // %pip, %run, and %fs cells should stay as Python cells - don't convert or remove the magic command.
+  // These are special Databricks commands that must remain visible in the cell content.
+  const magicTypeMap: Record<string, string> = {
+    '%pip': 'pip',
+    '%run': 'run',
+    '%fs': 'fs',
+  };
+  const preservedType = magicTypeMap[magic];
+  if (preservedType) {
     // Only update metadata if not already set to avoid repeated cell replacements
-    if (cell.metadata?.databricksType !== 'pip') {
+    if (cell.metadata?.databricksType !== preservedType) {
       const cellKey = cell.document.uri.toString();
       // Skip if already processed
       if (autoDetectedCells.has(cellKey)) {
@@ -549,7 +556,7 @@ async function handleMagicInPythonCell(
         languageId: 'python',
         metadata: {
           ...c.metadata,
-          databricksType: 'pip',
+          databricksType: preservedType,
         },
       }), {
         enterEditMode: true,
