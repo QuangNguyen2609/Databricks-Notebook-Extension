@@ -5,6 +5,11 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-04-02
+
+### Fixed
+- **%run and %fs magic commands no longer stripped from notebook cells**: The notebook rendering was incorrectly removing `%run` and `%fs` prefixes from cell content when the notebook change handler fired, treating them as removable magic commands instead of preserving them like `%pip`
+
 ## [0.4.4] - 2026-03-03
 
 ### Fixed
