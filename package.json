@@ -145,7 +145,7 @@
         "databricks-notebook.kernelStartupTimeout": {
           "type": "number",
           "default": 15000,
-          "description": "Timeout for kernel startup in milliseconds. Databricks Connect initialization can take 15-25 seconds on first run."
+          "description": "Timeout for kernel startup in milliseconds. With deferred Spark initialization, the kernel typically starts in 1-2 seconds."
         },
         "databricks-notebook.enableScrollableOutput": {
           "type": "boolean",
