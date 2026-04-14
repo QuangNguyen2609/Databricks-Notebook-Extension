@@ -1,31 +1,34 @@
-# Databricks Notebook Studio
-
 <p align="center">
-  <img src="assets/databricks-logo-icon.png" alt="Databricks Logo" width="128" height="128">
+  <img src="assets/banner.png" alt="Databricks" width="600">
 </p>
 
 A VS Code extension that transforms Databricks `.py` files into interactive notebooks with SQL execution, rich DataFrame display, and multi-profile authentication.
 
 ## Features
 
-### 🚀 Execute Code with Databricks Connect
+### Execute Code with Databricks Connect
 - **Run Python & SQL cells** directly against your Databricks cluster
 - **Serverless compute support** - no cluster management needed
 - **Persistent kernel state** - variables persist across cell executions like Jupyter
 
-### 📊 Rich DataFrame Display
+### Rich DataFrame Display
 - **Interactive tables** for Spark DataFrame results
 - **Column sorting and resizing** for easy data exploration
 - **Scrollable output** for large query results
 - **Formatted display** - automatic `spark.sql()` wrapping for SQL cells
 
-### 🔐 Multi-Profile Authentication
+### Multi-Profile Authentication
 - **Switch between Databricks profiles** with a single click
 - **Status bar indicator** showing current active profile
 - **Automatic kernel restart** on profile change
 - **Workspace-level persistence** - remembers your selection per project
 
-### 📝 Full Notebook Experience
+### SQL IntelliSense
+- **Schema & table suggestions** - auto-complete catalog, schema, and table names
+- **Column name completion** - type a table alias followed by `.` to get column suggestions (e.g., `a.` suggests columns from the aliased table)
+- **Context-aware recommendations** - suggestions adapt based on your query context
+
+### Full Notebook Experience
 - **Visual cell separation** with proper boundaries
 - **Rendered Markdown** with full formatting support
 - **Syntax highlighting** for Python, SQL, Scala, R, and Shell
@@ -57,30 +60,15 @@ This extension requires the following VS Code extensions (you'll be prompted to 
 For serverless compute support, you must use **Databricks Connect version 17.2 or earlier**. Version 17.3+ does not support serverless compute.
 
 ```bash
-# Install the correct version in your project's virtual environment
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On macOS/Linux
+# .venv\Scripts\activate   # On Windows
+
+# Install the correct version
 pip install "databricks-connect<=17.2"
 ```
 
-### Download from GitHub Releases (Recommended)
-
-1. Go to [Latest Release](https://github.com/QuangNguyen2609/Databricks-Notebook-Extension/releases/latest)
-2. Download the `.vsix` file
-3. In VS Code: `Ctrl+Shift+P` → "Extensions: Install from VSIX..."
-4. Select the downloaded `.vsix` file
-5. Install the required dependencies when prompted
-
-### Build from Source
-
-1. Clone the repository and build:
-   ```bash
-   bash build.sh
-   ```
-
-2. Install the generated `.vsix` file (see above)
-
-### From Marketplace (Coming Soon)
-
-Search for "Databricks Notebook Studio" in the VS Code Extensions Marketplace.
 
 ## Usage
 
@@ -91,6 +79,8 @@ Search for "Databricks Notebook Studio" in the VS Code Extensions Marketplace.
 2. **Command Palette**: Open a `.py` file, then use `Ctrl+Shift+P` and type "Open as Databricks Notebook"
 
 3. **Auto-detection**: When opening a file that starts with `# Databricks notebook source`, you'll be prompted to open it as a notebook
+
+> **Recommended:** Enable automatic rendering in settings for the best experience. Turn on `databricks-notebook.autoOpenNotebooks` in VS Code Settings, or open it directly: `vscode-insiders://settings/databricks-notebook.autoOpenNotebooks`
 
 ### Managing Databricks Profiles
 
@@ -106,6 +96,8 @@ The status bar shows:
 - `$(cloud) profile-name` - Profile is selected and active
 - `$(cloud) No Profile` - No profile selected (yellow warning)
 - `$(cloud) No Config` - No `~/.databrickscfg` file found (red error)
+
+> **Note:** Make sure a `databricks.yml` exists in your project (set up via the Databricks extension tab) that references the corresponding profile. If you want to use a different profile, you can switch it using the status bar or Command Palette but make sure to log into that profile using databricks auth login --profile profile_name to refresh the Access Token.
 
 #### Profile Configuration
 
@@ -219,75 +211,6 @@ print("Python cell")
 # MAGIC SELECT * FROM table
 ```
 
-## Development
-
-### Prerequisites
-
-- Node.js 18+
-- npm or yarn
-
-### Setup
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd databricks-notebook-studio
-
-# Install dependencies
-npm install
-
-# Compile
-npm run compile
-
-# Watch mode (for development)
-npm run watch
-```
-
-### Running the Extension
-
-1. Open the project in VS Code
-2. Press `F5` to start debugging
-3. A new VS Code window (Extension Development Host) will open
-4. Open a Databricks `.py` file to test
-
-### Running Tests
-
-```bash
-npm run test:unit
-```
-
-### Building for Production
-
-```bash
-npm run package
-```
-
-This creates a production-ready build in the `dist/` folder.
-
-## Architecture
-
-```
-src/
-├── extension.ts     # Extension entry point
-├── serializer.ts    # NotebookSerializer implementation
-├── parser.ts        # Databricks .py file parser
-├── controller.ts    # NotebookController (optional execution)
-└── types.ts         # TypeScript interfaces
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `npm run test:unit`
-5. Submit a pull request
-
 ## License
 
 MIT
-
-## Acknowledgments
-
-- Inspired by Databricks' notebook format and VS Code's Notebook API
-- Built with VS Code Extension API

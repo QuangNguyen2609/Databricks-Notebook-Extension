@@ -5,6 +5,19 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-04-14
+
+### Added
+- **SQL IntelliSense**: Schema, table, and column name suggestions with alias support (e.g., `a.` suggests columns from the aliased table)
+- **Dot-matrix banner**: New pixel-art "DATABRICKS" banner for README
+- **Virtual environment setup guide**: Added `python -m venv .venv` instructions for Databricks Connect installation
+- **Auto-open recommendation**: Added settings recommendation for `autoOpenNotebooks` in usage docs
+- **Profile configuration note**: Added `databricks.yml` requirement and `databricks auth login` instructions for profile switching
+
+### Changed
+- **Extension icon**: Updated to new Databricks icon
+- **README cleanup**: Removed development/architecture/contributing sections, streamlined formatting
+
 ## [0.4.8] - 2026-04-14
 
 ### Fixed
