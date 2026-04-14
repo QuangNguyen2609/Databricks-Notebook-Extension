@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "Harryngdev",
@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/QuangNguyen2609/Databricks-Notebook-Extension.git"
   },
-  "icon": "assets/databricks-icon.png",
+  "icon": "assets/databricks-icon-latest.png",
   "engines": {
     "vscode": "^1.80.0"
   },
