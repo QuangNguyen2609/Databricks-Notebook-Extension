@@ -5,6 +5,16 @@ All notable changes to the Databricks Notebook Studio extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-04-14
+
+### Changed
+- **Databricks Connect startup performance**: Kernel now reports ready in ~1-2 seconds instead of ~15 seconds by deferring Spark session initialization to a background thread
+  - A `LazySparkSession` proxy is placed in the namespace immediately so `spark` is available right away
+  - The proxy transparently blocks on first use (e.g. `spark.sql()`) until the real session is connected
+  - Pure Python cells can execute immediately without waiting for Databricks Connect
+  - Background thread sends a `spark_ready` status update to VS Code when initialization completes
+  - Thread-safe stdout writes prevent message interleaving between main and background threads
+
 ## [0.4.5] - 2026-04-02
 
 ### Fixed
