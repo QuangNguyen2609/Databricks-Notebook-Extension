@@ -2,7 +2,7 @@
   "name": "databricks-notebook-studio",
   "displayName": "Databricks Notebook Studio",
   "description": "Visualize Databricks .py notebooks with rich DataFrame display, interactive tables, column sorting/resizing, and multi-profile authentication",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "license": "MIT",
   "type": "commonjs",
   "publisher": "databricks-notebook-studio",
@@ -144,8 +144,8 @@
         },
         "databricks-notebook.kernelStartupTimeout": {
           "type": "number",
-          "default": 15000,
-          "description": "Timeout for kernel startup in milliseconds. Databricks Connect initialization can take 15-25 seconds on first run."
+          "default": 30000,
+          "description": "Timeout for kernel startup in milliseconds. With deferred Spark initialization, the kernel typically starts in 1-2 seconds."
         },
         "databricks-notebook.enableScrollableOutput": {
           "type": "boolean",
@@ -231,7 +231,7 @@
     "lint:fix": "eslint src --ext ts --fix",
     "test": "node ./out/test/runTest.js",
     "test:unit": "tsc --declaration false --declarationMap false && mocha 'out/test/{parser,profileManager,codeTransform,constants,serializer,requestCache,catalogService,tabManager,cellOperations,notebookDiagnosticProvider,persistentExecutor,kernelManager,pythonKernelController,kernelControls,pythonCompletion,linting,localImports,dotenv}.test.js'",
-    "test:python": "cd src/python && python3 test_kernel_runner.py",
+    "test:python": "cd src/python && python3 test_kernel_runner.py && python3 test_spark_auth.py",
     "test:coverage": "nyc --reporter=lcov --reporter=text npm run test:unit",
     "ci": "npm run type-check && npm run lint && npm run test:unit && npm run test:python && npm run compile"
   },

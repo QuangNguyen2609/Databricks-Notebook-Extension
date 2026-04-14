@@ -17,6 +17,7 @@ import signal
 import os
 import ast
 import asyncio
+import threading
 
 # Display utilities
 from display_utils import display_to_html
@@ -46,6 +47,96 @@ _local_widgets = None
 # This loop stays open throughout the kernel's lifetime to avoid
 # "Event loop is closed" errors with SDK clients that store loop references
 _event_loop = None
+
+# Thread-safe stdout lock for background spark init thread
+_stdout_lock = threading.Lock()
+
+# State for background spark initialization
+_spark_init_state = None
+
+# Reference to real stdout (before execution redirects it)
+_real_stdout = None
+
+
+class _SparkInitState:
+    """Thread-safe state for background spark initialization."""
+
+    def __init__(self):
+        self._ready = threading.Event()
+        self._session = None
+        self._error_msg = None
+        self._status = None
+
+    def set_success(self, session, status):
+        self._session = session
+        self._status = status
+        self._ready.set()
+
+    def set_failure(self, status):
+        self._error_msg = status
+        self._status = status
+        self._ready.set()
+
+    def wait(self, timeout=None):
+        return self._ready.wait(timeout=timeout)
+
+    @property
+    def is_ready(self):
+        return self._ready.is_set()
+
+
+class LazySparkSession:
+    """
+    Proxy that defers to the real SparkSession once background initialization completes.
+    Placed in the namespace immediately so 'spark' in dir() is True, but blocks on
+    first attribute access (e.g. spark.sql()) until the real session is available.
+    This allows the kernel to report 'ready' in ~1s instead of ~15s.
+    """
+
+    def __init__(self, init_state):
+        object.__setattr__(self, '_init_state', init_state)
+
+    def _get_session(self):
+        state = object.__getattribute__(self, '_init_state')
+        if not state.wait(timeout=120):
+            raise TimeoutError("Timed out waiting for Spark session initialization (120s)")
+        if state._error_msg:
+            # Background init may have failed with stale credentials; retry once
+            # synchronously (e.g. user ran `databricks auth login` after kernel started).
+            log_debug(f"Spark background init failed ({state._error_msg}), retrying...")
+            status = initialize_spark_session()
+            real_spark = _namespace.get('spark')
+            if real_spark is not None and not isinstance(real_spark, LazySparkSession):
+                state._session = real_spark
+                state._error_msg = None
+                state._status = status
+                return real_spark
+            state._error_msg = status
+            state._status = status
+            raise RuntimeError(
+                f"Spark session not available: {status}\n"
+                "Run 'databricks auth login' to configure authentication, then re-run the cell."
+            )
+        if state._session is None:
+            raise RuntimeError("Spark session failed to initialize")
+        return state._session
+
+    def __getattr__(self, name):
+        return getattr(self._get_session(), name)
+
+    def __setattr__(self, name, value):
+        setattr(self._get_session(), name, value)
+
+    def __repr__(self):
+        state = object.__getattribute__(self, '_init_state')
+        if state.is_ready and state._session:
+            return repr(state._session)
+        if state.is_ready and state._error_msg:
+            return f"<SparkSession (failed: {state._error_msg})>"
+        return "<SparkSession (initializing in background...)>"
+
+    def __bool__(self):
+        return True
 
 
 class LocalDbutils:
@@ -180,12 +271,10 @@ def initialize_dbutils(profile=None, host=None, token=None):
     sdk_status = None
 
     try:
-        from databricks.sdk import WorkspaceClient
-
         # Try profile-based auth first
         if profile:
             try:
-                w = WorkspaceClient(profile=profile)
+                w = _create_workspace_client(profile=profile)
                 sdk_dbutils = w.dbutils
                 sdk_status = "SDK: OK (profile)"
                 log_debug("SDK dbutils initialized via profile")
@@ -195,7 +284,7 @@ def initialize_dbutils(profile=None, host=None, token=None):
         # Try token-based auth if profile didn't work
         if sdk_dbutils is None and host and token:
             try:
-                w = WorkspaceClient(host=host, token=token)
+                w = _create_workspace_client(host=host, token=token, auth_type='pat')
                 sdk_dbutils = w.dbutils
                 sdk_status = "SDK: OK (token)"
                 log_debug("SDK dbutils initialized via token")
@@ -205,7 +294,7 @@ def initialize_dbutils(profile=None, host=None, token=None):
         # Try default config (env vars) if nothing else worked
         if sdk_dbutils is None:
             try:
-                w = WorkspaceClient()
+                w = _create_workspace_client()
                 sdk_dbutils = w.dbutils
                 sdk_status = "SDK: OK (default)"
                 log_debug("SDK dbutils initialized via default config")
@@ -228,73 +317,155 @@ def initialize_dbutils(profile=None, host=None, token=None):
     return (local_dbutils, status_message)
 
 
+def _create_serverless_spark(profile=None, host=None, token=None, auth_type=None):
+    """
+    Create a Databricks Connect serverless Spark session from an explicit SDK config.
+
+    Using sdkConfig(Config(...)) makes auth precedence explicit and avoids inheriting
+    conflicting auth methods from the ambient process environment.
+    """
+    from databricks.connect import DatabricksSession
+    from databricks.sdk.core import Config
+
+    config_kwargs = {
+        'serverless_compute_id': 'auto',
+    }
+    if profile:
+        config_kwargs['profile'] = profile
+    if host:
+        config_kwargs['host'] = host
+    if token:
+        config_kwargs['token'] = token
+    if auth_type:
+        config_kwargs['auth_type'] = auth_type
+
+    config = Config(**config_kwargs)
+    spark = DatabricksSession.builder.sdkConfig(config).getOrCreate()
+    return spark, DatabricksSession
+
+
+def _create_workspace_client(profile=None, host=None, token=None, auth_type=None):
+    """Create a WorkspaceClient with explicit auth inputs when provided."""
+    from databricks.sdk import WorkspaceClient
+
+    if profile or host or token or auth_type:
+        from databricks.sdk.core import Config
+
+        config_kwargs = {}
+        if profile:
+            config_kwargs['profile'] = profile
+        if host:
+            config_kwargs['host'] = host
+        if token:
+            config_kwargs['token'] = token
+        if auth_type:
+            config_kwargs['auth_type'] = auth_type
+
+        return WorkspaceClient(config=Config(**config_kwargs))
+
+    return WorkspaceClient()
+
+
+def _resolve_workspace_host() -> str | None:
+    """Workspace URL from DATABRICKS_HOST or the active profile's host."""
+    h = (os.environ.get('DATABRICKS_HOST') or '').strip()
+    if h:
+        return h
+    profile = get_databricks_profile()
+    if profile:
+        gh = get_host_from_profile(profile)
+        return (gh or '').strip() or None
+    return None
+
+
 def initialize_spark_session():
     """
     Initialize Databricks Connect SparkSession with serverless compute.
+
+    Auth precedence:
+    1. DATABRICKS_TOKEN + resolvable workspace host (env host or profile host) — PAT / explicit bearer
+    2. Profile-based connect (skipped when auth_type=databricks-cli; use token cache)
+    3. OAuth/access token from Databricks CLI token cache for the workspace host
     """
     errors = []
 
     profile = get_databricks_profile()
+    auth_type = get_auth_type_from_profile(profile) if profile else None
+    workspace_host = _resolve_workspace_host()
+    env_token = (os.environ.get('DATABRICKS_TOKEN') or '').strip()
+
     log_debug(f"Profile from env: {profile}")
+    log_debug(f"Workspace host resolved: {workspace_host}")
     log_debug(f"Home directory: {os.path.expanduser('~')}")
     log_debug(f"Platform: {os.name}")
-
-    # Read host and auth_type from profile config
-    host = os.environ.get('DATABRICKS_HOST')
-    auth_type = None
-
     if profile:
-        if not host:
-            host = get_host_from_profile(profile)
-            log_debug(f"Host from profile: {host}")
-        auth_type = get_auth_type_from_profile(profile)
         log_debug(f"Auth type from profile: {auth_type}")
 
     try:
-        from databricks.connect import DatabricksSession
+        # 1) Explicit token from environment + workspace host (highest priority)
+        if env_token and workspace_host:
+            log_debug("Attempting Databricks Connect with DATABRICKS_TOKEN and workspace host")
+            try:
+                spark, DatabricksSession = _create_serverless_spark(
+                    host=workspace_host,
+                    token=env_token,
+                    auth_type='pat',
+                )
+                _namespace['spark'] = spark
+                _namespace['DatabricksSession'] = DatabricksSession
+                _, dbutils_status = initialize_dbutils(
+                    profile=None, host=workspace_host, token=env_token
+                )
+                return f"OK: Databricks Connect initialized (env token). {dbutils_status}"
+            except Exception as e:
+                log_debug(f"Env token connect failed: {e}")
+                errors.append(f"Env token failed: {e}")
+        elif env_token and not workspace_host:
+            errors.append(
+                "DATABRICKS_TOKEN is set but workspace host is missing "
+                "(set DATABRICKS_HOST or a profile with host in ~/.databrickscfg)"
+            )
 
-        # Method 1: Profile + serverless (skip if auth_type=databricks-cli, it needs token from cache)
+        # 2) Profile + serverless (not for auth_type=databricks-cli — needs CLI token cache)
         if profile and auth_type != 'databricks-cli':
             log_debug(f"Attempting profile auth with profile: {profile}")
             try:
-                spark = DatabricksSession.builder.profile(profile).serverless(True).getOrCreate()
+                spark, DatabricksSession = _create_serverless_spark(profile=profile)
                 _namespace['spark'] = spark
                 _namespace['DatabricksSession'] = DatabricksSession
                 log_debug("Profile auth succeeded!")
-                # Initialize dbutils after spark
-                _, dbutils_status = initialize_dbutils(profile=profile, host=host)
+                _, dbutils_status = initialize_dbutils(profile=profile, host=workspace_host)
                 return f"OK: Databricks Connect initialized (profile: {profile}). {dbutils_status}"
             except Exception as e:
                 log_debug(f"Profile auth failed: {e}")
                 errors.append(f"Profile failed: {e}")
         elif auth_type == 'databricks-cli':
-            log_debug("Profile uses databricks-cli auth, will use token cache directly")
-        else:
-            log_debug("No profile set, skipping profile auth")
+            log_debug("Profile uses databricks-cli auth; token cache used if env token path did not succeed")
 
-        # Method 2: Token from CLI cache + serverless (for databricks-cli auth type)
-        log_debug(f"Host for token cache lookup: {host}")
-        if host:
-            token = get_token_from_cache(host)
+        # 3) Token from CLI cache + serverless
+        log_debug(f"Host for token cache lookup: {workspace_host}")
+        if workspace_host:
+            token = get_token_from_cache(workspace_host)
             log_debug(f"Token from cache: {'found' if token else 'not found'}")
             if token:
                 try:
-                    # IMPORTANT: Clear profile env var before token-based auth
-                    # The SDK reads DATABRICKS_CONFIG_PROFILE and applies profile's auth_type,
-                    # which can override explicit token auth (especially with auth_type=databricks-cli)
-                    if 'DATABRICKS_CONFIG_PROFILE' in os.environ:
-                        del os.environ['DATABRICKS_CONFIG_PROFILE']
-
-                    spark = DatabricksSession.builder.host(host).token(token).serverless(True).getOrCreate()
+                    spark, DatabricksSession = _create_serverless_spark(
+                        host=workspace_host,
+                        token=token,
+                        auth_type='pat',
+                    )
                     _namespace['spark'] = spark
                     _namespace['DatabricksSession'] = DatabricksSession
-                    # Initialize dbutils after spark
-                    _, dbutils_status = initialize_dbutils(host=host, token=token)
+                    _, dbutils_status = initialize_dbutils(
+                        profile=None, host=workspace_host, token=token
+                    )
                     return f"OK: Databricks Connect initialized (token cache). {dbutils_status}"
                 except Exception as e:
                     errors.append(f"Token cache failed: {e}")
-            else:
-                errors.append(f"No token found in cache for host: {host}")
+            elif not env_token:
+                errors.append(f"No token found in cache for host: {workspace_host}")
+        elif not workspace_host and not errors:
+            errors.append("No workspace host configured (DATABRICKS_HOST or profile host)")
 
     except ImportError as e:
         errors.append(f"Import failed: {e}")
@@ -303,6 +474,49 @@ def initialize_spark_session():
 
     error_msg = "; ".join(errors) if errors else "Unknown error"
     return f"WARN: Spark not initialized ({error_msg}). Run 'databricks auth login' to refresh tokens."
+
+
+def _write_json(data):
+    """Thread-safe write of a JSON message to real stdout."""
+    global _real_stdout
+    out = _real_stdout or sys.stdout
+    with _stdout_lock:
+        out.write(json.dumps(data, ensure_ascii=True, default=str) + '\n')
+        out.flush()
+
+
+def _background_spark_init(db_compatible, db_warning):
+    """
+    Initialize Spark session in a background thread and notify Node.js when done.
+    This allows the kernel to report 'ready' immediately while Spark connects.
+    """
+    global _spark_init_state
+
+    try:
+        if db_compatible:
+            status = initialize_spark_session()
+            # Check if real session was placed in namespace (not the proxy)
+            real_spark = _namespace.get('spark')
+            if real_spark is not None and not isinstance(real_spark, LazySparkSession):
+                _spark_init_state.set_success(real_spark, status)
+                log_debug(f"Background spark init succeeded: {status}")
+            else:
+                # Spark init returned a warning - didn't create a session
+                _spark_init_state.set_failure(status)
+                log_debug(f"Background spark init warning: {status}")
+        elif db_warning:
+            _spark_init_state.set_failure(f"WARN: {db_warning}")
+        else:
+            _spark_init_state.set_failure("databricks-connect not available")
+    except Exception as e:
+        _spark_init_state.set_failure(str(e))
+        log_debug(f"Background spark init error: {e}")
+
+    # Send spark_ready status update to Node.js
+    _write_json({
+        'type': 'spark_ready',
+        'spark_status': _spark_init_state._status,
+    })
 
 
 def handle_interrupt(signum, frame):
@@ -516,6 +730,10 @@ def get_variables():
 def main():
     """Main loop - read JSON commands from stdin, execute, write JSON responses to stdout."""
     import sys as _sys
+    global _spark_init_state, _real_stdout
+
+    # Save real stdout before anything can redirect it (execute_code swaps sys.stdout)
+    _real_stdout = _sys.stdout
 
     # Set up signal handler for interrupts
     signal.signal(signal.SIGINT, handle_interrupt)
@@ -572,14 +790,35 @@ def main():
     # Add display() function to namespace
     _namespace['display'] = display
 
-    # Initialize Spark session if available (skip if incompatible version)
+    # Initialize Spark session in BACKGROUND thread for fast startup.
+    # Instead of blocking 10-15s for DatabricksSession.getOrCreate(),
+    # we place a LazySparkSession proxy in the namespace and send "ready"
+    # immediately. The proxy blocks on first attribute access (e.g. spark.sql())
+    # until the real session is available, but by then the background init
+    # has had a head start (often already complete).
     spark_status = None
+    _spark_init_state = _SparkInitState()
+
     if db_compatible:
-        spark_status = initialize_spark_session()
+        # Place lazy proxy so 'spark' in dir() is True immediately
+        _namespace['spark'] = LazySparkSession(_spark_init_state)
+
+        # Start background initialization
+        init_thread = threading.Thread(
+            target=_background_spark_init,
+            args=(db_compatible, db_warning),
+            daemon=True,
+            name='spark-init',
+        )
+        init_thread.start()
+        spark_status = "INITIALIZING: Databricks Connect session starting in background..."
+        log_debug("Spark initialization started in background thread")
     elif db_warning:
         spark_status = f"WARN: {db_warning}"
+        _spark_init_state.set_failure(spark_status)
 
-    # Send ready signal with spark status and environment info
+    # Send ready signal IMMEDIATELY (no waiting for Spark)
+    # This reduces kernel startup from ~15s to ~1-2s
     ready_signal = {
         'type': 'ready',
         'version': '1.0',
@@ -590,7 +829,7 @@ def main():
         'databricks_connect_compatible': db_compatible,
         'added_import_paths': added_import_paths,
     }
-    print(json.dumps(ready_signal), flush=True)
+    _write_json(ready_signal)
 
     for line in sys.stdin:
         line = line.strip()
@@ -616,10 +855,9 @@ def main():
 
             result['id'] = request_id
             result['type'] = 'result'
-            # Use ensure_ascii=True and default=str to handle non-serializable values
+            # Thread-safe write (background spark init may write spark_ready concurrently)
             try:
-                output = json.dumps(result, ensure_ascii=True, default=str)
-                print(output, flush=True)
+                _write_json(result)
             except Exception as json_err:
                 # Fallback: return error without display data if serialization fails
                 fallback_result = {
@@ -630,22 +868,20 @@ def main():
                     'stdout': result.get('stdout', ''),
                     'stderr': result.get('stderr', ''),
                 }
-                print(json.dumps(fallback_result, ensure_ascii=True), flush=True)
+                _write_json(fallback_result)
 
         except json.JSONDecodeError as e:
-            error_result = {
+            _write_json({
                 'type': 'error',
                 'success': False,
                 'error': f'Invalid JSON: {str(e)}'
-            }
-            print(json.dumps(error_result), flush=True)
+            })
         except Exception as e:
-            error_result = {
+            _write_json({
                 'type': 'error',
                 'success': False,
                 'error': f'Internal error: {str(e)}'
-            }
-            print(json.dumps(error_result), flush=True)
+            })
 
 
 if __name__ == '__main__':

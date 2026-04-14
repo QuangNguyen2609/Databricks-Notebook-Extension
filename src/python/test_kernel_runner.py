@@ -12,9 +12,15 @@ Or: python test_kernel_runner.py
 import unittest
 import sys
 import os
+import types
 
 # Add the current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Avoid loading display_utils (pyspark/pandas) when importing kernel_runner for unit tests
+_display_utils_stub = types.ModuleType('display_utils')
+_display_utils_stub.display_to_html = lambda *a, **k: None
+sys.modules['display_utils'] = _display_utils_stub
 
 from kernel_runner import _contains_top_level_await, _run_async_code, execute_code
 

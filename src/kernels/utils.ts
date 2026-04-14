@@ -219,12 +219,27 @@ export function showKernelStatusNotifications(statusInfo: KernelStatusInfo): voi
   }
 
   // Notify about spark status
+  // Skip "INITIALIZING:" status - the real notification comes via spark_ready message
   if (statusInfo.sparkStatus) {
     if (statusInfo.sparkStatus.startsWith('OK:')) {
       showInfoMessage(`Kernel: ${statusInfo.sparkStatus}`);
     } else if (statusInfo.sparkStatus.startsWith('WARN:')) {
       showWarningMessage(`Kernel: ${statusInfo.sparkStatus}`);
     }
+    // INITIALIZING: is silently logged (notification comes when spark_ready arrives)
+  }
+}
+
+/**
+ * Show notification when deferred spark initialization completes.
+ * Called when the background spark init thread finishes and sends spark_ready.
+ * @param sparkStatus - Final spark status string
+ */
+export function showSparkReadyNotification(sparkStatus: string): void {
+  if (sparkStatus.startsWith('OK:')) {
+    showInfoMessage(`Kernel: ${sparkStatus}`);
+  } else if (sparkStatus.startsWith('WARN:')) {
+    showWarningMessage(`Kernel: ${sparkStatus}`);
   }
 }
 
