@@ -29,6 +29,7 @@ import {
   logKernelStatusDebug,
   createReadyWaiter,
   getKernelStartupTimeout,
+  showSparkReadyNotification,
 } from './utils';
 
 /**
@@ -340,6 +341,12 @@ export class PersistentExecutor implements vscode.Disposable {
         return;
       }
 
+      // Handle deferred spark initialization completion
+      if (message.type === 'spark_ready') {
+        this.handleSparkReadySignal(message as KernelResponse);
+        return;
+      }
+
       // Handle widget input requests from Python
       if (message.type === 'input_request') {
         this.handleWidgetInputRequest(message as WidgetInputRequest);
@@ -374,6 +381,22 @@ export class PersistentExecutor implements vscode.Disposable {
 
     // Show user notifications
     showKernelStatusNotifications(statusInfo);
+  }
+
+  /**
+   * Handle deferred spark initialization completion.
+   * Sent by background thread in kernel_runner.py after DatabricksSession is connected.
+   */
+  private handleSparkReadySignal(response: KernelResponse): void {
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    const sparkStatus = (response as { spark_status?: string }).spark_status;
+    if (sparkStatus) {
+      this._sparkStatus = sparkStatus;
+      if (this._debugMode) {
+        console.debug(`[Executor] Spark ready: ${sparkStatus}`);
+      }
+      showSparkReadyNotification(sparkStatus);
+    }
   }
 
   /**

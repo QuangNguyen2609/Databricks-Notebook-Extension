@@ -17,6 +17,7 @@ import signal
 import os
 import ast
 import asyncio
+import threading
 
 # Display utilities
 from display_utils import display_to_html
@@ -46,6 +47,84 @@ _local_widgets = None
 # This loop stays open throughout the kernel's lifetime to avoid
 # "Event loop is closed" errors with SDK clients that store loop references
 _event_loop = None
+
+# Thread-safe stdout lock for background spark init thread
+_stdout_lock = threading.Lock()
+
+# State for background spark initialization
+_spark_init_state = None
+
+# Reference to real stdout (before execution redirects it)
+_real_stdout = None
+
+
+class _SparkInitState:
+    """Thread-safe state for background spark initialization."""
+
+    def __init__(self):
+        self._ready = threading.Event()
+        self._session = None
+        self._error_msg = None
+        self._status = None
+
+    def set_success(self, session, status):
+        self._session = session
+        self._status = status
+        self._ready.set()
+
+    def set_failure(self, status):
+        self._error_msg = status
+        self._status = status
+        self._ready.set()
+
+    def wait(self, timeout=None):
+        return self._ready.wait(timeout=timeout)
+
+    @property
+    def is_ready(self):
+        return self._ready.is_set()
+
+
+class LazySparkSession:
+    """
+    Proxy that defers to the real SparkSession once background initialization completes.
+    Placed in the namespace immediately so 'spark' in dir() is True, but blocks on
+    first attribute access (e.g. spark.sql()) until the real session is available.
+    This allows the kernel to report 'ready' in ~1s instead of ~15s.
+    """
+
+    def __init__(self, init_state):
+        object.__setattr__(self, '_init_state', init_state)
+
+    def _get_session(self):
+        state = object.__getattribute__(self, '_init_state')
+        if not state.wait(timeout=120):
+            raise TimeoutError("Timed out waiting for Spark session initialization (120s)")
+        if state._error_msg:
+            raise RuntimeError(
+                f"Spark session not available: {state._error_msg}\n"
+                "Run 'databricks auth login' to configure authentication."
+            )
+        if state._session is None:
+            raise RuntimeError("Spark session failed to initialize")
+        return state._session
+
+    def __getattr__(self, name):
+        return getattr(self._get_session(), name)
+
+    def __setattr__(self, name, value):
+        setattr(self._get_session(), name, value)
+
+    def __repr__(self):
+        state = object.__getattribute__(self, '_init_state')
+        if state.is_ready and state._session:
+            return repr(state._session)
+        if state.is_ready and state._error_msg:
+            return f"<SparkSession (failed: {state._error_msg})>"
+        return "<SparkSession (initializing in background...)>"
+
+    def __bool__(self):
+        return True
 
 
 class LocalDbutils:
@@ -305,6 +384,49 @@ def initialize_spark_session():
     return f"WARN: Spark not initialized ({error_msg}). Run 'databricks auth login' to refresh tokens."
 
 
+def _write_json(data):
+    """Thread-safe write of a JSON message to real stdout."""
+    global _real_stdout
+    out = _real_stdout or sys.stdout
+    with _stdout_lock:
+        out.write(json.dumps(data, ensure_ascii=True, default=str) + '\n')
+        out.flush()
+
+
+def _background_spark_init(db_compatible, db_warning):
+    """
+    Initialize Spark session in a background thread and notify Node.js when done.
+    This allows the kernel to report 'ready' immediately while Spark connects.
+    """
+    global _spark_init_state
+
+    try:
+        if db_compatible:
+            status = initialize_spark_session()
+            # Check if real session was placed in namespace (not the proxy)
+            real_spark = _namespace.get('spark')
+            if real_spark is not None and not isinstance(real_spark, LazySparkSession):
+                _spark_init_state.set_success(real_spark, status)
+                log_debug(f"Background spark init succeeded: {status}")
+            else:
+                # Spark init returned a warning - didn't create a session
+                _spark_init_state.set_failure(status)
+                log_debug(f"Background spark init warning: {status}")
+        elif db_warning:
+            _spark_init_state.set_failure(f"WARN: {db_warning}")
+        else:
+            _spark_init_state.set_failure("databricks-connect not available")
+    except Exception as e:
+        _spark_init_state.set_failure(str(e))
+        log_debug(f"Background spark init error: {e}")
+
+    # Send spark_ready status update to Node.js
+    _write_json({
+        'type': 'spark_ready',
+        'spark_status': _spark_init_state._status,
+    })
+
+
 def handle_interrupt(signum, frame):
     """Handle SIGINT (Ctrl+C) gracefully."""
     raise KeyboardInterrupt()
@@ -516,6 +638,10 @@ def get_variables():
 def main():
     """Main loop - read JSON commands from stdin, execute, write JSON responses to stdout."""
     import sys as _sys
+    global _spark_init_state, _real_stdout
+
+    # Save real stdout before anything can redirect it (execute_code swaps sys.stdout)
+    _real_stdout = _sys.stdout
 
     # Set up signal handler for interrupts
     signal.signal(signal.SIGINT, handle_interrupt)
@@ -572,14 +698,35 @@ def main():
     # Add display() function to namespace
     _namespace['display'] = display
 
-    # Initialize Spark session if available (skip if incompatible version)
+    # Initialize Spark session in BACKGROUND thread for fast startup.
+    # Instead of blocking 10-15s for DatabricksSession.getOrCreate(),
+    # we place a LazySparkSession proxy in the namespace and send "ready"
+    # immediately. The proxy blocks on first attribute access (e.g. spark.sql())
+    # until the real session is available, but by then the background init
+    # has had a head start (often already complete).
     spark_status = None
+    _spark_init_state = _SparkInitState()
+
     if db_compatible:
-        spark_status = initialize_spark_session()
+        # Place lazy proxy so 'spark' in dir() is True immediately
+        _namespace['spark'] = LazySparkSession(_spark_init_state)
+
+        # Start background initialization
+        init_thread = threading.Thread(
+            target=_background_spark_init,
+            args=(db_compatible, db_warning),
+            daemon=True,
+            name='spark-init',
+        )
+        init_thread.start()
+        spark_status = "INITIALIZING: Databricks Connect session starting in background..."
+        log_debug("Spark initialization started in background thread")
     elif db_warning:
         spark_status = f"WARN: {db_warning}"
+        _spark_init_state.set_failure(spark_status)
 
-    # Send ready signal with spark status and environment info
+    # Send ready signal IMMEDIATELY (no waiting for Spark)
+    # This reduces kernel startup from ~15s to ~1-2s
     ready_signal = {
         'type': 'ready',
         'version': '1.0',
@@ -590,7 +737,7 @@ def main():
         'databricks_connect_compatible': db_compatible,
         'added_import_paths': added_import_paths,
     }
-    print(json.dumps(ready_signal), flush=True)
+    _write_json(ready_signal)
 
     for line in sys.stdin:
         line = line.strip()
@@ -616,10 +763,9 @@ def main():
 
             result['id'] = request_id
             result['type'] = 'result'
-            # Use ensure_ascii=True and default=str to handle non-serializable values
+            # Thread-safe write (background spark init may write spark_ready concurrently)
             try:
-                output = json.dumps(result, ensure_ascii=True, default=str)
-                print(output, flush=True)
+                _write_json(result)
             except Exception as json_err:
                 # Fallback: return error without display data if serialization fails
                 fallback_result = {
@@ -630,22 +776,20 @@ def main():
                     'stdout': result.get('stdout', ''),
                     'stderr': result.get('stderr', ''),
                 }
-                print(json.dumps(fallback_result, ensure_ascii=True), flush=True)
+                _write_json(fallback_result)
 
         except json.JSONDecodeError as e:
-            error_result = {
+            _write_json({
                 'type': 'error',
                 'success': False,
                 'error': f'Invalid JSON: {str(e)}'
-            }
-            print(json.dumps(error_result), flush=True)
+            })
         except Exception as e:
-            error_result = {
+            _write_json({
                 'type': 'error',
                 'success': False,
                 'error': f'Internal error: {str(e)}'
-            }
-            print(json.dumps(error_result), flush=True)
+            })
 
 
 if __name__ == '__main__':
