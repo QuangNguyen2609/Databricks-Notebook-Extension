@@ -144,7 +144,7 @@
         },
         "databricks-notebook.kernelStartupTimeout": {
           "type": "number",
-          "default": 15000,
+          "default": 30000,
           "description": "Timeout for kernel startup in milliseconds. With deferred Spark initialization, the kernel typically starts in 1-2 seconds."
         },
         "databricks-notebook.enableScrollableOutput": {
