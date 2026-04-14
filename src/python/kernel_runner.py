@@ -101,20 +101,20 @@ class LazySparkSession:
         if not state.wait(timeout=120):
             raise TimeoutError("Timed out waiting for Spark session initialization (120s)")
         if state._error_msg:
-            # Background init failed - retry synchronously in case user has
-            # re-authenticated since then (e.g. ran 'databricks auth login')
+            # Background init may have failed with stale credentials; retry once
+            # synchronously (e.g. user ran `databricks auth login` after kernel started).
             log_debug(f"Spark background init failed ({state._error_msg}), retrying...")
             status = initialize_spark_session()
             real_spark = _namespace.get('spark')
             if real_spark is not None and not isinstance(real_spark, LazySparkSession):
-                # Retry succeeded - update state so future accesses go through fast path
                 state._session = real_spark
                 state._error_msg = None
                 state._status = status
                 return real_spark
-            # Still failing
+            state._error_msg = status
+            state._status = status
             raise RuntimeError(
-                f"Spark session not available: {state._error_msg}\n"
+                f"Spark session not available: {status}\n"
                 "Run 'databricks auth login' to configure authentication, then re-run the cell."
             )
         if state._session is None:
@@ -271,12 +271,10 @@ def initialize_dbutils(profile=None, host=None, token=None):
     sdk_status = None
 
     try:
-        from databricks.sdk import WorkspaceClient
-
         # Try profile-based auth first
         if profile:
             try:
-                w = WorkspaceClient(profile=profile)
+                w = _create_workspace_client(profile=profile)
                 sdk_dbutils = w.dbutils
                 sdk_status = "SDK: OK (profile)"
                 log_debug("SDK dbutils initialized via profile")
@@ -286,7 +284,7 @@ def initialize_dbutils(profile=None, host=None, token=None):
         # Try token-based auth if profile didn't work
         if sdk_dbutils is None and host and token:
             try:
-                w = WorkspaceClient(host=host, token=token)
+                w = _create_workspace_client(host=host, token=token, auth_type='pat')
                 sdk_dbutils = w.dbutils
                 sdk_status = "SDK: OK (token)"
                 log_debug("SDK dbutils initialized via token")
@@ -296,7 +294,7 @@ def initialize_dbutils(profile=None, host=None, token=None):
         # Try default config (env vars) if nothing else worked
         if sdk_dbutils is None:
             try:
-                w = WorkspaceClient()
+                w = _create_workspace_client()
                 sdk_dbutils = w.dbutils
                 sdk_status = "SDK: OK (default)"
                 log_debug("SDK dbutils initialized via default config")
@@ -319,73 +317,155 @@ def initialize_dbutils(profile=None, host=None, token=None):
     return (local_dbutils, status_message)
 
 
+def _create_serverless_spark(profile=None, host=None, token=None, auth_type=None):
+    """
+    Create a Databricks Connect serverless Spark session from an explicit SDK config.
+
+    Using sdkConfig(Config(...)) makes auth precedence explicit and avoids inheriting
+    conflicting auth methods from the ambient process environment.
+    """
+    from databricks.connect import DatabricksSession
+    from databricks.sdk.core import Config
+
+    config_kwargs = {
+        'serverless_compute_id': 'auto',
+    }
+    if profile:
+        config_kwargs['profile'] = profile
+    if host:
+        config_kwargs['host'] = host
+    if token:
+        config_kwargs['token'] = token
+    if auth_type:
+        config_kwargs['auth_type'] = auth_type
+
+    config = Config(**config_kwargs)
+    spark = DatabricksSession.builder.sdkConfig(config).getOrCreate()
+    return spark, DatabricksSession
+
+
+def _create_workspace_client(profile=None, host=None, token=None, auth_type=None):
+    """Create a WorkspaceClient with explicit auth inputs when provided."""
+    from databricks.sdk import WorkspaceClient
+
+    if profile or host or token or auth_type:
+        from databricks.sdk.core import Config
+
+        config_kwargs = {}
+        if profile:
+            config_kwargs['profile'] = profile
+        if host:
+            config_kwargs['host'] = host
+        if token:
+            config_kwargs['token'] = token
+        if auth_type:
+            config_kwargs['auth_type'] = auth_type
+
+        return WorkspaceClient(config=Config(**config_kwargs))
+
+    return WorkspaceClient()
+
+
+def _resolve_workspace_host() -> str | None:
+    """Workspace URL from DATABRICKS_HOST or the active profile's host."""
+    h = (os.environ.get('DATABRICKS_HOST') or '').strip()
+    if h:
+        return h
+    profile = get_databricks_profile()
+    if profile:
+        gh = get_host_from_profile(profile)
+        return (gh or '').strip() or None
+    return None
+
+
 def initialize_spark_session():
     """
     Initialize Databricks Connect SparkSession with serverless compute.
+
+    Auth precedence:
+    1. DATABRICKS_TOKEN + resolvable workspace host (env host or profile host) — PAT / explicit bearer
+    2. Profile-based connect (skipped when auth_type=databricks-cli; use token cache)
+    3. OAuth/access token from Databricks CLI token cache for the workspace host
     """
     errors = []
 
     profile = get_databricks_profile()
+    auth_type = get_auth_type_from_profile(profile) if profile else None
+    workspace_host = _resolve_workspace_host()
+    env_token = (os.environ.get('DATABRICKS_TOKEN') or '').strip()
+
     log_debug(f"Profile from env: {profile}")
+    log_debug(f"Workspace host resolved: {workspace_host}")
     log_debug(f"Home directory: {os.path.expanduser('~')}")
     log_debug(f"Platform: {os.name}")
-
-    # Read host and auth_type from profile config
-    host = os.environ.get('DATABRICKS_HOST')
-    auth_type = None
-
     if profile:
-        if not host:
-            host = get_host_from_profile(profile)
-            log_debug(f"Host from profile: {host}")
-        auth_type = get_auth_type_from_profile(profile)
         log_debug(f"Auth type from profile: {auth_type}")
 
     try:
-        from databricks.connect import DatabricksSession
+        # 1) Explicit token from environment + workspace host (highest priority)
+        if env_token and workspace_host:
+            log_debug("Attempting Databricks Connect with DATABRICKS_TOKEN and workspace host")
+            try:
+                spark, DatabricksSession = _create_serverless_spark(
+                    host=workspace_host,
+                    token=env_token,
+                    auth_type='pat',
+                )
+                _namespace['spark'] = spark
+                _namespace['DatabricksSession'] = DatabricksSession
+                _, dbutils_status = initialize_dbutils(
+                    profile=None, host=workspace_host, token=env_token
+                )
+                return f"OK: Databricks Connect initialized (env token). {dbutils_status}"
+            except Exception as e:
+                log_debug(f"Env token connect failed: {e}")
+                errors.append(f"Env token failed: {e}")
+        elif env_token and not workspace_host:
+            errors.append(
+                "DATABRICKS_TOKEN is set but workspace host is missing "
+                "(set DATABRICKS_HOST or a profile with host in ~/.databrickscfg)"
+            )
 
-        # Method 1: Profile + serverless (skip if auth_type=databricks-cli, it needs token from cache)
+        # 2) Profile + serverless (not for auth_type=databricks-cli — needs CLI token cache)
         if profile and auth_type != 'databricks-cli':
             log_debug(f"Attempting profile auth with profile: {profile}")
             try:
-                spark = DatabricksSession.builder.profile(profile).serverless(True).getOrCreate()
+                spark, DatabricksSession = _create_serverless_spark(profile=profile)
                 _namespace['spark'] = spark
                 _namespace['DatabricksSession'] = DatabricksSession
                 log_debug("Profile auth succeeded!")
-                # Initialize dbutils after spark
-                _, dbutils_status = initialize_dbutils(profile=profile, host=host)
+                _, dbutils_status = initialize_dbutils(profile=profile, host=workspace_host)
                 return f"OK: Databricks Connect initialized (profile: {profile}). {dbutils_status}"
             except Exception as e:
                 log_debug(f"Profile auth failed: {e}")
                 errors.append(f"Profile failed: {e}")
         elif auth_type == 'databricks-cli':
-            log_debug("Profile uses databricks-cli auth, will use token cache directly")
-        else:
-            log_debug("No profile set, skipping profile auth")
+            log_debug("Profile uses databricks-cli auth; token cache used if env token path did not succeed")
 
-        # Method 2: Token from CLI cache + serverless (for databricks-cli auth type)
-        log_debug(f"Host for token cache lookup: {host}")
-        if host:
-            token = get_token_from_cache(host)
+        # 3) Token from CLI cache + serverless
+        log_debug(f"Host for token cache lookup: {workspace_host}")
+        if workspace_host:
+            token = get_token_from_cache(workspace_host)
             log_debug(f"Token from cache: {'found' if token else 'not found'}")
             if token:
                 try:
-                    # IMPORTANT: Clear profile env var before token-based auth
-                    # The SDK reads DATABRICKS_CONFIG_PROFILE and applies profile's auth_type,
-                    # which can override explicit token auth (especially with auth_type=databricks-cli)
-                    if 'DATABRICKS_CONFIG_PROFILE' in os.environ:
-                        del os.environ['DATABRICKS_CONFIG_PROFILE']
-
-                    spark = DatabricksSession.builder.host(host).token(token).serverless(True).getOrCreate()
+                    spark, DatabricksSession = _create_serverless_spark(
+                        host=workspace_host,
+                        token=token,
+                        auth_type='pat',
+                    )
                     _namespace['spark'] = spark
                     _namespace['DatabricksSession'] = DatabricksSession
-                    # Initialize dbutils after spark
-                    _, dbutils_status = initialize_dbutils(host=host, token=token)
+                    _, dbutils_status = initialize_dbutils(
+                        profile=None, host=workspace_host, token=token
+                    )
                     return f"OK: Databricks Connect initialized (token cache). {dbutils_status}"
                 except Exception as e:
                     errors.append(f"Token cache failed: {e}")
-            else:
-                errors.append(f"No token found in cache for host: {host}")
+            elif not env_token:
+                errors.append(f"No token found in cache for host: {workspace_host}")
+        elif not workspace_host and not errors:
+            errors.append("No workspace host configured (DATABRICKS_HOST or profile host)")
 
     except ImportError as e:
         errors.append(f"Import failed: {e}")
