@@ -101,9 +101,21 @@ class LazySparkSession:
         if not state.wait(timeout=120):
             raise TimeoutError("Timed out waiting for Spark session initialization (120s)")
         if state._error_msg:
+            # Background init failed - retry synchronously in case user has
+            # re-authenticated since then (e.g. ran 'databricks auth login')
+            log_debug(f"Spark background init failed ({state._error_msg}), retrying...")
+            status = initialize_spark_session()
+            real_spark = _namespace.get('spark')
+            if real_spark is not None and not isinstance(real_spark, LazySparkSession):
+                # Retry succeeded - update state so future accesses go through fast path
+                state._session = real_spark
+                state._error_msg = None
+                state._status = status
+                return real_spark
+            # Still failing
             raise RuntimeError(
                 f"Spark session not available: {state._error_msg}\n"
-                "Run 'databricks auth login' to configure authentication."
+                "Run 'databricks auth login' to configure authentication, then re-run the cell."
             )
         if state._session is None:
             raise RuntimeError("Spark session failed to initialize")
